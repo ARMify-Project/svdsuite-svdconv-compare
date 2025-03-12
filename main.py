@@ -81,6 +81,7 @@ def main() -> None:
 
         if not compare.compare():
             logging.error("Found differences between svdconv and svdsuite for %s", svd_meta.path)
+            raise SystemExit(1)
 
         logging.info("Finished processing %s\n\n", svd_meta.path)
 
