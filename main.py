@@ -59,10 +59,17 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    logging.basicConfig(level=logging.INFO)
+
     for svd_meta in args.svd_meta_list:
+        logging.info("Processing %s", svd_meta.path)
+
         svdconv_peripherals = parse_svdconv_output(svd_meta.path)
 
         if svdconv_peripherals is None:
+            logging.info(
+                "Processing of %s was canceled because the file could not be parsed with svdconv\n\n", svd_meta.path
+            )
             continue
 
         # Suppress ParserWarning
@@ -74,6 +81,8 @@ def main() -> None:
 
         if not compare.compare():
             logging.error("Found differences between svdconv and svdsuite for %s", svd_meta.path)
+
+        logging.info("Finished processing %s\n\n", svd_meta.path)
 
 
 if __name__ == "__main__":

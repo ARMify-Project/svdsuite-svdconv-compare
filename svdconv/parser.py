@@ -194,7 +194,7 @@ class SVDConvParser:
         peripheral = Peripheral(
             name=data.get("name", name),
             version=data.get("version") or None,
-            description=data.get("description") or None,
+            description=None,
             alternate_peripheral=data.get("alternatePeripheral") or None,
             group_name=data.get("groupName") or None,
             prepend_to_name=data.get("prependToName") or None,
@@ -258,7 +258,7 @@ class SVDConvParser:
             index += 1
         intr = Interrupt(
             name=intr_data.get("Name", ""),
-            description=intr_data.get("Description", "") or None,
+            description=None,
             value=int(intr_data.get("Value", "0")),
             parsed=None,  # type: ignore
         )
@@ -293,7 +293,7 @@ class SVDConvParser:
         reg = Register(
             name=data.get("name", name),
             display_name=data.get("displayName") or None,
-            description=data.get("description") or None,
+            description=None,
             alternate_group=data.get("alternateGroup") or None,
             alternate_register=data.get("alternateRegister") or None,
             address_offset=int(data.get("addressOffset", "0").replace("0x", ""), 16) if "addressOffset" in data else 0,
@@ -351,7 +351,7 @@ class SVDConvParser:
                 index += 1
         cluster = Cluster(
             name=data.get("name", name),
-            description=data.get("description") or None,
+            description=None,
             alternate_cluster=data.get("alternateCluster") or None,
             header_struct_name=data.get("headerStructName") or None,
             address_offset=int(data.get("addressOffset", "0").replace("0x", ""), 16) if "addressOffset" in data else 0,
@@ -388,7 +388,7 @@ class SVDConvParser:
         bit_width = int(data.get("bitWidth", "0"))
         field_obj = Field(
             name=data.get("name", field_name),
-            description=data.get("description") or None,
+            description=None,
             bit_offset=bit_offset,
             bit_width=bit_width,
             lsb=bit_offset,
@@ -405,14 +405,37 @@ class SVDConvParser:
         # Check for Enum Containers following the Field.
         while index < len(lines):
             if lines[index].strip().startswith("=== Enum Container:"):
-                enum_container, index = self.parse_enum_container(lines, index)
+                enum_container, index = self.parse_enum_container(lines, index, bit_offset, bit_offset + bit_width - 1)
                 field_obj.enumerated_value_containers.append(enum_container)
             else:
                 break
 
         return field_obj, index
 
-    def parse_enum_container(self, lines: list[str], index: int) -> tuple[EnumeratedValueContainer, int]:
+    def _extend_enumerated_values_with_default(
+        self, enumerated_values: list[EnumeratedValue], default: EnumeratedValue, lsb: int, msb: int
+    ) -> list[EnumeratedValue]:
+        covered_values = {value.value for value in enumerated_values if value.value is not None}
+        all_possible_values = set(range(pow(2, msb - lsb + 1)))
+
+        uncovered_values = all_possible_values - covered_values
+
+        for value in uncovered_values:
+            enumerated_values.append(
+                EnumeratedValue(
+                    name=f"{default.name}_{value}",
+                    description=None,
+                    value=value,
+                    is_default=False,
+                    parsed=default.parsed,
+                )
+            )
+
+        return [value for value in enumerated_values if not value.is_default]
+
+    def parse_enum_container(
+        self, lines: list[str], index: int, lsb: int, msb: int
+    ) -> tuple[EnumeratedValueContainer, int]:
         # Begins with a line like "=== Enum Container: <Name> ==="
         line = lines[index].strip()
         m = re.match(r"=== Enum Container: (.+) ===", line)
@@ -443,6 +466,13 @@ class SVDConvParser:
             else:
                 break
 
+        # If there is a default EnumeratedValue, extend the list of EnumeratedValues with all possible values.
+        default_enum = next((ev for ev in enum_container.enumerated_values if ev.is_default), None)
+        if default_enum is not None:
+            enum_container.enumerated_values = self._extend_enumerated_values_with_default(
+                enum_container.enumerated_values, default_enum, lsb, msb
+            )
+
         enum_container.enumerated_values = sorted(
             enum_container.enumerated_values, key=lambda ev: ev.value if ev.value is not None else 0
         )
@@ -472,11 +502,15 @@ class SVDConvParser:
             int_value = 0
         enum_obj = EnumeratedValue(
             name=data.get("name", ""),
-            description=data.get("description"),
+            description=None,
             value=int_value,
             is_default=data.get("isDefault", "false").lower() in ("true", "yes", "1"),
             parsed=None,  # type: ignore
         )
+
+        if enum_obj.is_default:
+            enum_obj.value = None
+
         return enum_obj, index
 
 
