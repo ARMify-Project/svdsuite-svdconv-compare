@@ -25,6 +25,8 @@ from svdsuite.model.types import (
 
 logger = logging.getLogger(__name__)
 
+WHITESPACES = 4
+
 
 def _get_access_type(access: str) -> AccessType:
     if access == "UNDEF":
@@ -325,7 +327,20 @@ class SVDConvParser:
 
         return reg, index
 
+    def get_current_depth(self, line: str) -> int:
+        if not line.strip().startswith("==="):
+            raise ValueError("Expected a new section to begin with '==='")
+
+        whitespace_count = len(line) - len(line.lstrip())
+
+        if whitespace_count % WHITESPACES != 0:
+            raise ValueError("Unexpected indentation")
+
+        return whitespace_count // WHITESPACES
+
     def parse_cluster(self, lines: list[str], index: int) -> tuple["Cluster", int]:
+        cluster_depth = self.get_current_depth(lines[index])
+
         header_line = lines[index].strip()
         m = re.match(r"=== Cluster (.+) ===", header_line)
         name = m.group(1).strip() if m else "UnknownCluster"
@@ -344,6 +359,8 @@ class SVDConvParser:
             if index >= len(lines):
                 break
             if lines[index].strip().startswith("==="):
+                if self.get_current_depth(lines[index]) == cluster_depth:
+                    break
                 element, index = self.parse_register_or_cluster(lines, index)
                 if element is not None:
                     registers_clusters.append(element)
