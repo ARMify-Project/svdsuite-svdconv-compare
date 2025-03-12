@@ -356,13 +356,15 @@ class SVDConvParser:
             header_struct_name=data.get("headerStructName") or None,
             address_offset=int(data.get("addressOffset", "0").replace("0x", ""), 16) if "addressOffset" in data else 0,
             parsed=None,  # type: ignore
-            size=int(data.get("size", "0")),
+            size=int(data.get("size effective", "0")),
             access=_get_access_type(data.get("access", "")),
             protection=_get_protection_type(data.get("protection", "")),
             reset_value=int(data.get("resetValue", "0").replace("0x", ""), 16) if "resetValue" in data else 0,
             reset_mask=int(data.get("resetMask", "0").replace("0x", ""), 16) if "resetMask" in data else 0,
             registers_clusters=sorted(registers_clusters, key=lambda rc: (rc.address_offset, rc.name)),
-            base_address=0,
+            base_address=(
+                int(data.get("Absolute Address", "0").replace("0x", ""), 16) if "Absolute Address" in data else 0
+            ),
             end_address=0,
             cluster_size=0,
         )
