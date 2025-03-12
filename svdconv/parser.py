@@ -523,6 +523,8 @@ def run_svdconv(svd_path: str, args: None | list[str] = None) -> str:
         capture_output=True,
         text=True,
         check=False,
+        encoding="utf-8",
+        errors="replace",
     )
 
     return result.stdout
