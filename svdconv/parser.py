@@ -1,7 +1,9 @@
-import re
 import os
 import logging
 import subprocess
+import re
+import json
+from typing import Any
 
 from svdsuite.model.process import (
     Peripheral,
@@ -24,8 +26,6 @@ from svdsuite.model.types import (
 )
 
 logger = logging.getLogger(__name__)
-
-WHITESPACES = 4
 
 
 def _get_access_type(access: str) -> AccessType:
@@ -166,302 +166,206 @@ def _get_enum_usage(usage: str) -> EnumUsageType:
 
 
 class SVDConvParser:
-    def __init__(self, lines: list[str]):
-        self.lines = lines
+    def __init__(self, json_output: str) -> None:
+        try:
+            self.data = json.loads(json_output)
+        except json.JSONDecodeError as e:
+            logger.error("Failed to parse JSON output from svdconv: %s", e)
+            self.data = None
 
     def parse(self) -> list[Peripheral]:
-        # Split the output into peripheral blocks using a separator (e.g. a line with many '^')
-        peripheral_blocks: list[list[str]] = []
-        current_block: list[str] = []
-        for line in self.lines:
-            if "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^" in line:
-                if current_block:
-                    peripheral_blocks.append(current_block)
-                    current_block = []
+        if self.data is None:
+            return []
+
+        peripherals: list[Peripheral] = []
+        for peripheral in self.data:
+            peripherals.append(
+                Peripheral(
+                    name=peripheral["name"],
+                    version=peripheral["version"] or None,
+                    description=None,
+                    alternate_peripheral=peripheral["alternatePeripheral"] or None,
+                    group_name=peripheral["groupName"] or None,
+                    prepend_to_name=peripheral["prependToName"] or None,
+                    append_to_name=peripheral["appendToName"] or None,
+                    header_struct_name=peripheral["headerStructName"] or None,
+                    disable_condition=(
+                        None if peripheral["disableCondition"] == "NULL" else peripheral["disableCondition"]
+                    ),
+                    base_address=peripheral["baseAddress"],
+                    address_blocks=self._parse_address_blocks(peripheral["addressBlocks"]),
+                    interrupts=self._parse_interrupts(peripheral["interrupts"]),
+                    parsed=None,  # type: ignore
+                    size=peripheral["sizeEffective"],
+                    access=_get_access_type(peripheral["access"]),
+                    protection=_get_protection_type(peripheral["protection"]),
+                    reset_value=peripheral["resetValue"],
+                    reset_mask=peripheral["resetMask"],
+                    end_address=0,
+                    end_address_effective=0,
+                    peripheral_size=0,
+                    peripheral_size_effective=0,
+                    registers_clusters=self._parse_registers_clusters(peripheral["registersClusters"]),
+                    registers=[],
+                )
+            )
+
+        return sorted(peripherals, key=lambda x: (x.base_address, x.name))
+
+    def _parse_address_blocks(self, address_blocks: list[dict[str, Any]]) -> list[AddressBlock]:
+        result: list[AddressBlock] = []
+        for addr_block in address_blocks:
+            result.append(
+                AddressBlock(
+                    offset=addr_block["offset"],
+                    size=addr_block["size"],
+                    usage=_get_addr_block_usage(addr_block["usage"]),
+                    protection=_get_protection_type(addr_block["protection"]),
+                    parsed=None,  # type: ignore
+                )
+            )
+
+        return sorted(result, key=lambda x: x.offset)
+
+    def _parse_interrupts(self, interrupts: list[dict[str, Any]]) -> list[Interrupt]:
+        result: list[Interrupt] = []
+        for interrupt in interrupts:
+            result.append(
+                Interrupt(
+                    name=interrupt["name"],
+                    description=None,
+                    value=interrupt["value"],
+                    parsed=None,  # type: ignore
+                )
+            )
+
+        return sorted(result, key=lambda x: x.value)
+
+    def _parse_registers_clusters(self, registers_clusters: list[dict[str, Any]]) -> list[Register | Cluster]:
+        result: list[Register | Cluster] = []
+        for reg_cluster in registers_clusters:
+            if reg_cluster["type"] == "register":
+                result.append(self._parse_register(reg_cluster))
+            elif reg_cluster["type"] == "cluster":
+                result.append(self._parse_cluster(reg_cluster))
             else:
-                if line.strip() == "":  # Skip empty lines and lines which only contain whitespace
-                    continue
+                raise NotImplementedError(f"Unknown type: {reg_cluster['type']}")
 
-                current_block.append(line)
-        if current_block:
-            peripheral_blocks.append(current_block)
+        return sorted(result, key=lambda x: (x.address_offset, x.name))
 
-        peripherals = [self.parse_peripheral(block) for block in peripheral_blocks]
-        return sorted(peripherals, key=lambda p: (p.base_address, p.name))
-
-    def parse_peripheral(self, lines: list[str]) -> "Peripheral":
-        # The first line should be something like "=== Peripheral <Name> ==="
-        header_line = lines[0].strip()
-        m = re.match(r"=== Peripheral (.+) ===", header_line)
-        name = m.group(1).strip() if m else "UnknownPeripheral"
-        data = {"name": name}
-        index = 1
-        # Read lines until a new section (e.g., "Address Block:", "Interrupt:" or "===") begins.
-        while index < len(lines):
-            line = lines[index].strip()
-            if line.startswith("Address Block:") or line.startswith("Interrupt:") or line.startswith("==="):
-                break
-            if ":" in line:
-                key, value = line.split(":", 1)
-                data[key.strip()] = value.strip()
-            index += 1
-
-        # Parse Address Blocks and Interrupts
-        address_blocks: list[AddressBlock] = []
-        interrupts: list[Interrupt] = []
-        registers_clusters: list[Register | Cluster] = []
-        while index < len(lines):
-            line = lines[index]
-            if line.strip().startswith("Address Block:"):
-                block, index = self.parse_address_block(lines, index)
-                address_blocks.append(block)
-            elif line.strip().startswith("Interrupt:"):
-                intr, index = self.parse_interrupt(lines, index)
-                interrupts.append(intr)
-            elif line.strip().startswith("==="):
-                element, index = self.parse_register_or_cluster(lines, index)
-                if element is not None:
-                    registers_clusters.append(element)
-            else:
-                index += 1
-
-        peripheral = Peripheral(
-            name=data.get("name", name),
-            version=data.get("version") or None,
+    def _parse_register(self, register: dict[str, Any]) -> Register:
+        return Register(
+            name=register["name"],
+            display_name=register["displayName"] or None,
             description=None,
-            alternate_peripheral=data.get("alternatePeripheral") or None,
-            group_name=data.get("groupName") or None,
-            prepend_to_name=data.get("prependToName") or None,
-            append_to_name=data.get("appendToName") or None,
-            header_struct_name=data.get("headerStructName") or None,
-            disable_condition=None if data.get("disableCondition") == "NULL" else data.get("disableCondition"),
-            base_address=int(data.get("baseAddress", "0").replace("0x", ""), 16) if "baseAddress" in data else 0,
-            address_blocks=sorted(address_blocks, key=lambda ab: ab.offset),
-            interrupts=sorted(interrupts, key=lambda intr: intr.value),
-            parsed=None,  # type: ignore
-            size=int(data.get("size effective", 0)),
-            access=_get_access_type(data.get("access", "")),
-            protection=_get_protection_type(data.get("protection", "")),
-            reset_value=int(data.get("resetValue", "0").replace("0x", ""), 16) if "resetValue" in data else 0,
-            reset_mask=int(data.get("resetMask", "0").replace("0x", ""), 16) if "resetMask" in data else 0,
-            end_address=0,
-            end_address_effective=0,
-            peripheral_size=0,
-            peripheral_size_effective=0,
-            registers_clusters=sorted(registers_clusters, key=lambda rc: (rc.address_offset, rc.name)),
-            registers=[],
-        )
-        return peripheral
-
-    def parse_address_block(self, lines: list[str], index: int) -> tuple["AddressBlock", int]:
-        # Skip the "Address Block:" line.
-        index += 1
-        block_data: dict[str, str] = {}
-        while index < len(lines):
-            if (
-                lines[index].strip().startswith("Interrupt:")
-                or lines[index].strip().startswith("Address Block:")
-                or lines[index].strip().startswith("===")
-            ):
-                break
-            key, value = lines[index].strip().split(":", 1)
-            block_data[key.strip()] = value.strip()
-            index += 1
-        block = AddressBlock(
-            offset=int(block_data.get("Offset", "0").replace("0x", ""), 16) if "Offset" in block_data else 0,
-            size=int(block_data.get("Size", "0")),
-            usage=_get_addr_block_usage(block_data.get("Usage", "")),
-            protection=_get_protection_type(block_data.get("Protection", "")) or None,
-            parsed=None,  # type: ignore
-        )
-        return block, index
-
-    def parse_interrupt(self, lines: list[str], index: int) -> tuple["Interrupt", int]:
-        # Skip the "Interrupt:" line.
-        index += 1
-        intr_data: dict[str, str] = {}
-        while index < len(lines):
-            if (
-                lines[index].strip().startswith("Interrupt:")
-                or lines[index].strip().startswith("Address Block:")
-                or lines[index].strip().startswith("===")
-            ):
-                break
-            key, value = lines[index].strip().split(":", 1)
-            intr_data[key.strip()] = value.strip()
-            index += 1
-        intr = Interrupt(
-            name=intr_data.get("Name", ""),
-            description=None,
-            value=int(intr_data.get("Value", "0")),
-            parsed=None,  # type: ignore
-        )
-        return intr, index
-
-    def parse_register_or_cluster(self, lines: list[str], index: int) -> tuple[None | Register | Cluster, int]:
-        line = lines[index].strip()
-        if line.startswith("=== Register"):
-            reg, index = self.parse_register(lines, index)
-            return reg, index
-        elif line.startswith("=== Cluster"):
-            cluster, index = self.parse_cluster(lines, index)
-            return cluster, index
-        else:
-            index += 1
-            return None, index
-
-    def parse_register(self, lines: list[str], index: int) -> tuple["Register", int]:
-        header_line = lines[index].strip()
-        m = re.match(r"=== Register (.+?) \(with prepend & append: (.+?)\) ===", header_line)
-        name = m.group(1).strip() if m else "UnknownRegister"
-        data: dict[str, str] = {"name": name}
-        index += 1
-        while index < len(lines):
-            line = lines[index].strip()
-            if line.startswith("==="):
-                break
-            if ":" in line:
-                key, value = line.split(":", 1)
-                data[key.strip()] = value.strip()
-            index += 1
-        reg = Register(
-            name=data.get("name", name),
-            display_name=data.get("displayName") or None,
-            description=None,
-            alternate_group=data.get("alternateGroup") or None,
-            alternate_register=data.get("alternateRegister") or None,
-            address_offset=int(data.get("addressOffset", "0").replace("0x", ""), 16) if "addressOffset" in data else 0,
-            data_type=_get_data_type(data.get("dataType", "")) or None,
-            modified_write_values=_get_modified_write_value(data.get("modifiedWriteValues", "")),
+            alternate_group=register["alternateGroup"] or None,
+            alternate_register=register["alternateRegister"] or None,
+            address_offset=register["addressOffset"],
+            data_type=_get_data_type(register["dataType"]),
+            modified_write_values=_get_modified_write_value(register["modifiedWriteValues"]),
             write_constraint=None,
-            read_action=_get_read_action(data.get("readAction", "")) or None,
+            read_action=_get_read_action(register["readAction"]),
             parsed=None,  # type: ignore
-            size=int(data.get("size effective", "0")),
-            access=_get_access_type(data.get("access", "")),
-            protection=_get_protection_type(data.get("protection", "")),
-            reset_value=int(data.get("resetValue", "0").replace("0x", ""), 16) if "resetValue" in data else 0,
-            reset_mask=int(data.get("resetMask", "0").replace("0x", ""), 16) if "resetMask" in data else 0,
-            base_address=(
-                int(data.get("Absolute Address", "0").replace("0x", ""), 16) if "Absolute Address" in data else 0
-            ),
-            fields=[],
+            size=register["sizeEffective"],
+            access=_get_access_type(register["access"]),
+            protection=_get_protection_type(register["protection"]),
+            reset_value=register["resetValue"],
+            reset_mask=register["resetMask"],
+            base_address=register["absoluteAddress"],
+            fields=self._parse_fields(register["fields"]),
         )
 
-        # If there are Fields listed directly under the register, parse them.
-        while index < len(lines):
-            if lines[index].strip().startswith("=== Field"):
-                field_obj, index = self.parse_field(lines, index)
-                reg.fields.append(field_obj)
-            else:
-                break
-
-        reg.fields = sorted(reg.fields, key=lambda f: (f.lsb, f.name))
-
-        return reg, index
-
-    def get_current_depth(self, line: str) -> int:
-        if not line.strip().startswith("==="):
-            raise ValueError("Expected a new section to begin with '==='")
-
-        whitespace_count = len(line) - len(line.lstrip())
-
-        if whitespace_count % WHITESPACES != 0:
-            raise ValueError("Unexpected indentation")
-
-        return whitespace_count // WHITESPACES
-
-    def parse_cluster(self, lines: list[str], index: int) -> tuple["Cluster", int]:
-        cluster_depth = self.get_current_depth(lines[index])
-
-        header_line = lines[index].strip()
-        m = re.match(r"=== Cluster (.+) ===", header_line)
-        name = m.group(1).strip() if m else "UnknownCluster"
-        data = {"name": name}
-        index += 1
-        while index < len(lines):
-            line = lines[index].strip()
-            if line.startswith("==="):
-                break
-            if ":" in line:
-                key, value = line.split(":", 1)
-                data[key.strip()] = value.strip()
-            index += 1
-        registers_clusters: list[Register | Cluster] = []
-        while index < len(lines):
-            if index >= len(lines):
-                break
-            if lines[index].strip().startswith("==="):
-                if self.get_current_depth(lines[index]) == cluster_depth:
-                    break
-                element, index = self.parse_register_or_cluster(lines, index)
-                if element is not None:
-                    registers_clusters.append(element)
-            else:
-                index += 1
-        cluster = Cluster(
-            name=data.get("name", name),
+    def _parse_cluster(self, cluster: dict[str, Any]) -> Cluster:
+        return Cluster(
+            name=cluster["name"],
             description=None,
-            alternate_cluster=data.get("alternateCluster") or None,
-            header_struct_name=data.get("headerStructName") or None,
-            address_offset=int(data.get("addressOffset", "0").replace("0x", ""), 16) if "addressOffset" in data else 0,
+            alternate_cluster=cluster["alternateCluster"] or None,
+            header_struct_name=cluster["headerStructName"] or None,
+            address_offset=cluster["addressOffset"],
             parsed=None,  # type: ignore
-            size=int(data.get("size effective", "0")),
-            access=_get_access_type(data.get("access", "")),
-            protection=_get_protection_type(data.get("protection", "")),
-            reset_value=int(data.get("resetValue", "0").replace("0x", ""), 16) if "resetValue" in data else 0,
-            reset_mask=int(data.get("resetMask", "0").replace("0x", ""), 16) if "resetMask" in data else 0,
-            registers_clusters=sorted(registers_clusters, key=lambda rc: (rc.address_offset, rc.name)),
-            base_address=(
-                int(data.get("Absolute Address", "0").replace("0x", ""), 16) if "Absolute Address" in data else 0
-            ),
+            size=cluster["sizeEffective"],
+            access=_get_access_type(cluster["access"]),
+            protection=_get_protection_type(cluster["protection"]),
+            reset_value=cluster["resetValue"],
+            reset_mask=cluster["resetMask"],
+            registers_clusters=self._parse_registers_clusters(cluster["registersClusters"]),
+            base_address=cluster["absoluteAddress"],
             end_address=0,
             cluster_size=0,
         )
-        return cluster, index
 
-    def parse_field(self, lines: list[str], index: int) -> tuple[Field, int]:
-        # Begins with a line like "=== Field <Name> ==="
-        line = lines[index].strip()
-        m = re.match(r"=== Field (.+) ===", line)
-        field_name = m.group(1).strip() if m else "UnknownField"
-        data = {"name": field_name}
-        index += 1
-        while index < len(lines):
-            line = lines[index].strip()
-            # End the field block if an empty line or a new header is encountered.
-            if not line or line.startswith("==="):
-                break
-            if ":" in line:
-                key, value = line.split(":", 1)
-                data[key.strip()] = value.strip()
-            index += 1
-        bit_offset = int(data.get("bitOffset", "0"))
-        bit_width = int(data.get("bitWidth", "0"))
-        field_obj = Field(
-            name=data.get("name", field_name),
-            description=None,
-            bit_offset=bit_offset,
-            bit_width=bit_width,
-            lsb=bit_offset,
-            msb=bit_offset + bit_width - 1,
-            access=_get_access_type(data.get("access", "")),
-            modified_write_values=_get_modified_write_value(data.get("modifiedWriteValues", "")),
-            write_constraint=None,
-            read_action=_get_read_action(data.get("readAction", "")) or None,
-            enumerated_value_containers=[],
-            bit_range=(bit_offset + bit_width - 1, bit_offset),
-            parsed=None,  # type: ignore
-        )
+    def _parse_fields(self, fields: list[dict[str, Any]]) -> list[Field]:
+        result: list[Field] = []
+        for field in fields:
+            bit_offset = field["bitOffset"]
+            bit_width = field["bitWidth"]
+            result.append(
+                Field(
+                    name=field["name"],
+                    description=None,
+                    bit_offset=bit_offset,
+                    bit_width=bit_width,
+                    lsb=bit_offset,
+                    msb=bit_offset + bit_width - 1,
+                    access=_get_access_type(field["access"]),
+                    modified_write_values=_get_modified_write_value(field["modifiedWriteValues"]),
+                    write_constraint=None,
+                    read_action=_get_read_action(field["readAction"]),
+                    enumerated_value_containers=self._parse_enum_value_containers(
+                        field["enumContainers"], bit_offset, bit_offset + bit_width - 1
+                    ),
+                    bit_range=(bit_offset + bit_width - 1, bit_offset),
+                    parsed=None,  # type: ignore
+                )
+            )
 
-        # Check for Enum Containers following the Field.
-        while index < len(lines):
-            if lines[index].strip().startswith("=== Enum Container:"):
-                enum_container, index = self.parse_enum_container(lines, index, bit_offset, bit_offset + bit_width - 1)
-                field_obj.enumerated_value_containers.append(enum_container)
-            else:
-                break
+        return sorted(result, key=lambda x: (x.lsb, x.name))
 
-        return field_obj, index
+    def _parse_enum_value_containers(
+        self, enum_containers: list[dict[str, Any]], lsb: int, msb: int
+    ) -> list[EnumeratedValueContainer]:
+        result: list[EnumeratedValueContainer] = []
+        for enum_container in enum_containers:
+            enum_container_obj = EnumeratedValueContainer(
+                name=enum_container["name"] or None,
+                header_enum_name=enum_container["headerEnumName"] or None,
+                usage=_get_enum_usage(enum_container["usage"]),
+                enumerated_values=self._parse_enumerated_values(enum_container["enumeratedValues"]),
+                parsed=None,  # type: ignore
+            )
+
+            # If there is a default EnumeratedValue, extend the list of EnumeratedValues with all possible values.
+            default_enum = next((ev for ev in enum_container_obj.enumerated_values if ev.is_default), None)
+            if default_enum is not None:
+                enum_container_obj.enumerated_values = self._extend_enumerated_values_with_default(
+                    enum_container_obj.enumerated_values, default_enum, lsb, msb
+                )
+
+            enum_container_obj.enumerated_values = sorted(
+                enum_container_obj.enumerated_values, key=lambda x: x.value if x.value is not None else 0
+            )
+
+            result.append(enum_container_obj)
+
+        return result
+
+    def _parse_enumerated_values(self, enumerated_values: list[dict[str, Any]]) -> list[EnumeratedValue]:
+        result: list[EnumeratedValue] = []
+        for enum_value in enumerated_values:
+            enum_obj = EnumeratedValue(
+                name=enum_value["name"],
+                description=None,
+                value=int(enum_value["value"].replace("0b", ""), 2),
+                is_default=enum_value["isDefault"],
+                parsed=None,  # type: ignore
+            )
+
+            if enum_obj.is_default:
+                enum_obj.value = None
+
+            result.append(enum_obj)
+
+        return result
 
     def _extend_enumerated_values_with_default(
         self, enumerated_values: list[EnumeratedValue], default: EnumeratedValue, lsb: int, msb: int
@@ -483,86 +387,6 @@ class SVDConvParser:
             )
 
         return [value for value in enumerated_values if not value.is_default]
-
-    def parse_enum_container(
-        self, lines: list[str], index: int, lsb: int, msb: int
-    ) -> tuple[EnumeratedValueContainer, int]:
-        # Begins with a line like "=== Enum Container: <Name> ==="
-        line = lines[index].strip()
-        m = re.match(r"=== Enum Container: (.+) ===", line)
-        container_name = m.group(1).strip() if m else None
-        data: dict[str, str | None] = {"name": container_name}
-        index += 1
-        while index < len(lines):
-            line = lines[index].strip()
-            if not line or line.startswith("===") or line.startswith("Enum:"):
-                break
-            if ":" in line:
-                key, value = line.split(":", 1)
-                data[key.strip()] = value.strip()
-            index += 1
-        enum_container = EnumeratedValueContainer(
-            name=data.get("name", container_name),
-            header_enum_name=data.get("headerEnumName") or None,
-            usage=_get_enum_usage(data.get("usage", "")),  # type: ignore
-            enumerated_values=[],
-            parsed=None,  # type: ignore
-        )
-        # Parse one or more Enum blocks if present.
-        while index < len(lines):
-            if lines[index].strip().startswith("Enum:"):
-                enum_obj, index = self.parse_enum(lines, index)
-                if enum_obj is not None:
-                    enum_container.enumerated_values.append(enum_obj)
-            else:
-                break
-
-        # If there is a default EnumeratedValue, extend the list of EnumeratedValues with all possible values.
-        default_enum = next((ev for ev in enum_container.enumerated_values if ev.is_default), None)
-        if default_enum is not None:
-            enum_container.enumerated_values = self._extend_enumerated_values_with_default(
-                enum_container.enumerated_values, default_enum, lsb, msb
-            )
-
-        enum_container.enumerated_values = sorted(
-            enum_container.enumerated_values, key=lambda ev: ev.value if ev.value is not None else 0
-        )
-
-        return enum_container, index
-
-    def parse_enum(self, lines: list[str], index: int) -> tuple[EnumeratedValue | None, int]:
-        # The Enum block begins with "Enum:" and contains key/value pairs.
-        line = lines[index].strip()
-        if not line.startswith("Enum:"):
-            return None, index
-        data: dict[str, str] = {}
-        index += 1
-        while index < len(lines):
-            line = lines[index].strip()
-            # End if an empty line or a new header is encountered.
-            if not line or line.startswith("===") or re.match(r"^[^ ]", lines[index]) or line.startswith("Enum:"):
-                break
-            if ":" in line:
-                key, value = line.split(":", 1)
-                data[key.strip()] = value.strip()
-            index += 1
-        bin_value = data.get("value", "0")
-        try:
-            int_value = int(bin_value.replace("0b", ""), 2)
-        except ValueError:
-            int_value = 0
-        enum_obj = EnumeratedValue(
-            name=data.get("name", ""),
-            description=None,
-            value=int_value,
-            is_default=data.get("isDefault", "false").lower() in ("true", "yes", "1"),
-            parsed=None,  # type: ignore
-        )
-
-        if enum_obj.is_default:
-            enum_obj.value = None
-
-        return enum_obj, index
 
 
 def run_svdconv(svd_path: str, args: None | list[str] = None) -> str:
@@ -600,8 +424,7 @@ def parse_svdconv_output(svd_path: str) -> None | list[Peripheral]:
         logger.error("Found %d errors in svdconv output for %s", errors, svd_path)
         return None
 
-    debug_output = run_svdconv(svd_path, ["--debug-output", "--quiet"])
-    lines = debug_output.splitlines()
-    parser = SVDConvParser(lines)
+    json_output = run_svdconv(svd_path, ["--debug-output-json", "--quiet"])
+    parser = SVDConvParser(json_output)
 
     return parser.parse()
