@@ -11,6 +11,7 @@ from compare import Compare
 
 ACCEPTED_DIFFERENCES = [
     {"vendor": "ELAN", "name": "eKTF7020_DFP", "version": "1.0.1", "svd_name": "eKTF7020"},
+    {"vendor": "ELAN", "name": "eWD720_DFP", "version": "1.0.1", "svd_name": "eWD720"},
 ]
 
 
