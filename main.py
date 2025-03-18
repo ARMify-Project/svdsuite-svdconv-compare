@@ -8,6 +8,8 @@ from svdsuite import Process
 from svdconv.parser import parse_svdconv_output
 from compare import Compare
 
+LAST_SUCCESSFUL = {"vendor": "GigaDevice", "name": "GD32L23x_DFP", "version": "1.0.3", "svd_name": "GD32L23x"}
+
 ACCEPTED_DIFFERENCES = [
     # multiple interrupts in one interrupt element
     {"vendor": "ELAN", "name": "eKTF7020_DFP", "version": "1.0.1", "svd_name": "eKTF7020"},
@@ -74,6 +76,20 @@ def is_accepted_difference(svd_meta: SVDMeta) -> bool:
     return False
 
 
+def skip_to_untested(svd_meta_list: list[SVDMeta]) -> list[SVDMeta]:
+    if "LAST_SUCCESSFUL" in globals():
+        for index, svd_meta in enumerate(svd_meta_list):
+            if (
+                LAST_SUCCESSFUL["vendor"] == svd_meta.vendor
+                and LAST_SUCCESSFUL["name"] == svd_meta.name
+                and LAST_SUCCESSFUL["version"] == svd_meta.version
+                and LAST_SUCCESSFUL["svd_name"] == svd_meta.svd
+            ):
+                return svd_meta_list[index + 1 :]
+
+    return svd_meta_list
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -85,7 +101,10 @@ def main() -> None:
 
     logging.basicConfig(level=logging.INFO)
 
-    for svd_meta in args.svd_meta_list:
+    # skip all svd files until the last successful one if LAST_SUCCESSFUL is defined
+    svd_meta_list = skip_to_untested(args.svd_meta_list)
+
+    for svd_meta in svd_meta_list:
         logging.info("Processing %s", svd_meta.path)
 
         svdconv_peripherals = parse_svdconv_output(svd_meta.path)
