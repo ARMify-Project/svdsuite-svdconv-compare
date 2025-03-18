@@ -243,6 +243,13 @@ class SVDConvParser:
         return sorted(result, key=lambda x: x.value)
 
     def _parse_registers_clusters(self, registers_clusters: list[dict[str, Any]]) -> list[Register | Cluster]:
+        def sort_key(reg_cluster: Cluster | Register) -> tuple[int, tuple[int, str], str]:
+            # Get alternate_group if it exists; default to None if not (e.g. for Clusters)
+            alt = getattr(reg_cluster, "alternate_group", None)
+            # If alt is None, return (0, '') so that None sorts before any string; else (1, alt)
+            alt_key = (0, "") if alt is None else (1, alt)
+            return (reg_cluster.base_address, alt_key, reg_cluster.name)
+
         result: list[Register | Cluster] = []
         for reg_cluster in registers_clusters:
             if reg_cluster["type"] == "register":
@@ -252,7 +259,7 @@ class SVDConvParser:
             else:
                 raise NotImplementedError(f"Unknown type: {reg_cluster['type']}")
 
-        return sorted(result, key=lambda x: (x.address_offset, x.name))
+        return sorted(result, key=sort_key)
 
     def _parse_register(self, register: dict[str, Any]) -> Register:
         return Register(
