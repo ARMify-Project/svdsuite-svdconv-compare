@@ -9,6 +9,7 @@ from svdsuite.model.process import (
     Peripheral,
     Field,
     EnumeratedValueContainer,
+    IEnumeratedValue,
     EnumeratedValue,
     AddressBlock,
     Register,
@@ -330,29 +331,23 @@ class SVDConvParser:
                 name=enum_container["name"] or None,
                 header_enum_name=enum_container["headerEnumName"] or None,
                 usage=_get_enum_usage(enum_container["usage"]),
-                enumerated_values=self._parse_enumerated_values(enum_container["enumeratedValues"]),
+                enumerated_values=self._parse_enumerated_values(enum_container["enumeratedValues"], lsb, msb),
                 parsed=None,  # type: ignore
             )
 
-            # If there is a default EnumeratedValue, extend the list of EnumeratedValues with all possible values.
-            default_enum = next((ev for ev in enum_container_obj.enumerated_values if ev.is_default), None)
-            if default_enum is not None:
-                enum_container_obj.enumerated_values = self._extend_enumerated_values_with_default(
-                    enum_container_obj.enumerated_values, default_enum, lsb, msb
-                )
-
-            enum_container_obj.enumerated_values = sorted(
-                enum_container_obj.enumerated_values, key=lambda x: x.value if x.value is not None else 0
-            )
+            enum_container_obj.enumerated_values = sorted(enum_container_obj.enumerated_values, key=lambda x: x.value)
 
             result.append(enum_container_obj)
 
         return result
 
-    def _parse_enumerated_values(self, enumerated_values: list[dict[str, Any]]) -> list[EnumeratedValue]:
-        result: list[EnumeratedValue] = []
+    def _parse_enumerated_values(
+        self, enumerated_values: list[dict[str, Any]], lsb: int, msb: int
+    ) -> list[EnumeratedValue]:
+        default_enum = None
+        result: list[IEnumeratedValue] = []
         for enum_value in enumerated_values:
-            enum_obj = EnumeratedValue(
+            enum_obj = IEnumeratedValue(
                 name=enum_value["name"],
                 description=None,
                 value=int(enum_value["value"].replace("0b", ""), 2),
@@ -361,15 +356,26 @@ class SVDConvParser:
             )
 
             if enum_obj.is_default:
+                default_enum = enum_obj
                 enum_obj.value = None
 
             result.append(enum_obj)
 
-        return result
+        if default_enum is not None:
+            result = self._extend_enumerated_values_with_default(result, default_enum, lsb, msb)
+
+        enumerated_values_list: list[EnumeratedValue] = []
+        for enum_value in result:
+            if enum_value.value is None:
+                raise ValueError("Enumerated value is None")
+
+            enumerated_values_list.append(EnumeratedValue.from_intermediate_enum_value(enum_value, enum_value.value))
+
+        return enumerated_values_list
 
     def _extend_enumerated_values_with_default(
-        self, enumerated_values: list[EnumeratedValue], default: EnumeratedValue, lsb: int, msb: int
-    ) -> list[EnumeratedValue]:
+        self, enumerated_values: list[IEnumeratedValue], default: IEnumeratedValue, lsb: int, msb: int
+    ) -> list[IEnumeratedValue]:
         covered_values = {value.value for value in enumerated_values if value.value is not None}
         all_possible_values = set(range(pow(2, msb - lsb + 1)))
 
@@ -377,7 +383,7 @@ class SVDConvParser:
 
         for value in uncovered_values:
             enumerated_values.append(
-                EnumeratedValue(
+                IEnumeratedValue(
                     name=f"{default.name}_{value}",
                     description=None,
                     value=value,

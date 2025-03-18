@@ -405,8 +405,4 @@ class Compare:
                 logger.warning("Enumerated value value mismatch: %s != %s", ev_c.value, ev_s.value)
                 return False
 
-            if ev_c.is_default != ev_s.is_default:
-                logger.warning("Enumerated value is_default mismatch: %s != %s", ev_c.is_default, ev_s.is_default)
-                return False
-
         return True
