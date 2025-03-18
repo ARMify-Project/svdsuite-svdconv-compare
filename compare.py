@@ -278,7 +278,7 @@ class Compare:
             logger.warning("Cluster protection mismatch: %s != %s", cluster_c.protection, cluster_s.protection)
             return False
 
-        # Can't compare reset values and masks do to a bug in svdconv
+        # Can't compare reset values and masks due to a bug in svdconv
 
         # if cluster_c.reset_value != cluster_s.reset_value:
         #     logger.warning("Cluster reset value mismatch: %s != %s", cluster_c.reset_value, cluster_s.reset_value)
