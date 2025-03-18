@@ -9,7 +9,9 @@ from svdconv.parser import parse_svdconv_output
 from compare import Compare
 
 ACCEPTED_DIFFERENCES = [
+    # multiple interrupts in one interrupt element
     {"vendor": "ELAN", "name": "eKTF7020_DFP", "version": "1.0.1", "svd_name": "eKTF7020"},
+    # multiple interrupts in one interrupt element
     {"vendor": "ELAN", "name": "eWD720_DFP", "version": "1.0.1", "svd_name": "eWD720"},
 ]
 
