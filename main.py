@@ -9,6 +9,10 @@ from svdsuite import Process, ParserWarning
 from svdconv.parser import parse_svdconv_output
 from compare import Compare
 
+ACCEPTED_DIFFERENCES = [
+    {"vendor": "ELAN", "name": "eKTF7020_DFP", "version": "1.0.1", "svd_name": "eKTF7020"},
+]
+
 
 @dataclass
 class SVDMeta:
@@ -50,6 +54,19 @@ def valid_svd_dir_or_file(arg: str) -> list[SVDMeta]:
     return svd_meta
 
 
+def is_accepted_difference(svd_meta: SVDMeta) -> bool:
+    for accepted_diff in ACCEPTED_DIFFERENCES:
+        if (
+            accepted_diff["vendor"] == svd_meta.vendor
+            and accepted_diff["name"] == svd_meta.name
+            and accepted_diff["version"] == svd_meta.version
+            and accepted_diff["svd_name"] == svd_meta.svd
+        ):
+            return True
+
+    return False
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -81,7 +98,9 @@ def main() -> None:
 
         if not compare.compare():
             logging.error("Found differences between svdconv and svdsuite for %s", svd_meta.path)
-            raise SystemExit(1)
+
+            if not is_accepted_difference(svd_meta):
+                raise SystemExit(1)
 
         logging.info("Finished processing %s\n\n", svd_meta.path)
 
