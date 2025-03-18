@@ -11,8 +11,13 @@ from compare import Compare
 ACCEPTED_DIFFERENCES = [
     # multiple interrupts in one interrupt element
     {"vendor": "ELAN", "name": "eKTF7020_DFP", "version": "1.0.1", "svd_name": "eKTF7020"},
+    #
     # multiple interrupts in one interrupt element
     {"vendor": "ELAN", "name": "eWD720_DFP", "version": "1.0.1", "svd_name": "eWD720"},
+    #
+    # svd content: <peripheral derivedFrom="DMA1"><name>DMA2</name><description/><groupName/>
+    # SVDConv wrongly accepts <groupName/> as a valid group name and doesn't inherhit the real group name from DMA1
+    {"vendor": "Geehy", "name": "APM32E1xx_DFP", "version": "1.0.0", "svd_name": "APM32E103xx"},
 ]
 
 
