@@ -1,10 +1,9 @@
 import logging
 import argparse
 import pathlib
-import warnings
 import re
 from dataclasses import dataclass
-from svdsuite import Process, ParserWarning
+from svdsuite import Process
 
 from svdconv.parser import parse_svdconv_output
 from compare import Compare
@@ -90,11 +89,7 @@ def main() -> None:
             )
             continue
 
-        # Suppress ParserWarning
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=ParserWarning, module="svdsuite.parse")
-            svdsuite_peripherals = Process.from_svd_file(svd_meta.path).get_processed_device().peripherals
-
+        svdsuite_peripherals = Process.from_svd_file(svd_meta.path).get_processed_device().peripherals
         compare = Compare(svdconv_peripherals, svdsuite_peripherals)
 
         if not compare.compare():
