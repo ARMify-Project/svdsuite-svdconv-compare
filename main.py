@@ -80,10 +80,10 @@ def skip_to_untested(svd_meta_list: list[SVDMeta]) -> list[SVDMeta]:
     if "LAST_SUCCESSFUL" in globals():
         for index, svd_meta in enumerate(svd_meta_list):
             if (
-                LAST_SUCCESSFUL["vendor"] == svd_meta.vendor
-                and LAST_SUCCESSFUL["name"] == svd_meta.name
-                and LAST_SUCCESSFUL["version"] == svd_meta.version
-                and LAST_SUCCESSFUL["svd_name"] == svd_meta.svd
+                LAST_SUCCESSFUL["vendor"] == svd_meta.vendor  # pylint: disable=E0602  #pyright: ignore
+                and LAST_SUCCESSFUL["name"] == svd_meta.name  # pylint: disable=E0602  #pyright: ignore
+                and LAST_SUCCESSFUL["version"] == svd_meta.version  # pylint: disable=E0602  #pyright: ignore
+                and LAST_SUCCESSFUL["svd_name"] == svd_meta.svd  # pylint: disable=E0602  #pyright: ignore
             ):
                 return svd_meta_list[index + 1 :]
 
