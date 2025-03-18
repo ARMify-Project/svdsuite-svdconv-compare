@@ -8,7 +8,7 @@ from svdsuite import Process
 from svdconv.parser import parse_svdconv_output
 from compare import Compare
 
-LAST_SUCCESSFUL = {"vendor": "GigaDevice", "name": "GD32L23x_DFP", "version": "1.0.3", "svd_name": "GD32L23x"}
+LAST_SUCCESSFUL = {"vendor": "Infineon", "name": "XMC1000_DFP", "version": "2.12.0", "svd_name": "XMC1200"}
 
 ACCEPTED_DIFFERENCES = [
     # multiple interrupts in one interrupt element
