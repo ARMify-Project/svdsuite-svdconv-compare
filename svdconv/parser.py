@@ -346,7 +346,7 @@ class SVDConvParser:
 
             result.append(enum_container_obj)
 
-        return result
+        return sorted(result, key=lambda x: (x.usage.value, len(x.enumerated_values)))
 
     def _parse_enumerated_values(
         self, enumerated_values: list[dict[str, Any]], lsb: int, msb: int
