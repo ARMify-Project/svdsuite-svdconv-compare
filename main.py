@@ -8,7 +8,7 @@ from svdsuite import Process
 from svdconv.parser import parse_svdconv_output
 from compare import Compare
 
-LAST_SUCCESSFUL = {"vendor": "LAPISTechnology", "name": "ML630Q46x_DFP", "version": "1.0.3", "svd_name": "ML630Q464"}
+LAST_SUCCESSFUL = {"vendor": "NSING", "name": "N32G032_DFP", "version": "0.2.2", "svd_name": "N32G032"}
 
 ACCEPTED_DIFFERENCES = [
     # svd content: <peripheral derivedFrom="DMA1"><name>DMA2</name><description/><groupName/>
@@ -18,6 +18,18 @@ ACCEPTED_DIFFERENCES = [
     # contains register with <dim>4</dim> but name doesn't contain %s
     # SVDConv ignores this register, SVDSuite removes the <dim> tag
     {"vendor": "Maxim", "name": "MAX32570", "version": "0.3.0", "svd_name": "max32570"},
+    #
+    # contains register with <dim>4</dim> but name doesn't contain %s
+    # SVDConv ignores this register, SVDSuite removes the <dim> tag
+    {"vendor": "Maxim", "name": "MAX32655", "version": "1.0.0", "svd_name": "max32655"},
+    #
+    # contains register with <dim>4</dim> but name doesn't contain %s
+    # SVDConv ignores this register, SVDSuite removes the <dim> tag
+    {"vendor": "Maxim", "name": "MAX32670", "version": "1.0.3", "svd_name": "max32670"},
+    #
+    # contains register with <dim>4</dim> but name doesn't contain %s
+    # SVDConv ignores this register, SVDSuite removes the <dim> tag
+    {"vendor": "Maxim", "name": "MAX32675", "version": "1.2.0", "svd_name": "max32675"},
 ]
 
 
