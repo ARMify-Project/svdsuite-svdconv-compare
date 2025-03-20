@@ -22,6 +22,12 @@ class Compare:
         return self._compare_peripherals()
 
     def _compare_peripherals(self) -> bool:
+        if len(self._svdconv_peripherals) != len(self._svdsuite_peripherals):
+            logger.warning(
+                "Peripherals count mismatch: %s != %s", len(self._svdconv_peripherals), len(self._svdsuite_peripherals)
+            )
+            return False
+
         for peri_c, peri_s in zip(self._svdconv_peripherals, self._svdsuite_peripherals):
             if peri_c.name != peri_s.name:
                 logger.warning("Name mismatch: %s != %s", peri_c.name, peri_s.name)
