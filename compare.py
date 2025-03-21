@@ -284,15 +284,13 @@ class Compare:
             logger.warning("Cluster protection mismatch: %s != %s", cluster_c.protection, cluster_s.protection)
             return False
 
-        # Can't compare reset values and masks due to a bug in svdconv
+        if cluster_c.reset_value != cluster_s.reset_value:
+            logger.warning("Cluster reset value mismatch: %s != %s", cluster_c.reset_value, cluster_s.reset_value)
+            return False
 
-        # if cluster_c.reset_value != cluster_s.reset_value:
-        #     logger.warning("Cluster reset value mismatch: %s != %s", cluster_c.reset_value, cluster_s.reset_value)
-        #     return False
-
-        # if cluster_c.reset_mask != cluster_s.reset_mask:
-        #     logger.warning("Cluster reset mask mismatch: %s != %s", cluster_c.reset_mask, cluster_s.reset_mask)
-        #     return False
+        if cluster_c.reset_mask != cluster_s.reset_mask:
+            logger.warning("Cluster reset mask mismatch: %s != %s", cluster_c.reset_mask, cluster_s.reset_mask)
+            return False
 
         if len(cluster_c.registers_clusters) != len(cluster_s.registers_clusters):
             logger.warning(
