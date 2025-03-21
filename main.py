@@ -8,8 +8,6 @@ from svdsuite import Process
 from svdconv.parser import parse_svdconv_output
 from compare import Compare
 
-LAST_SUCCESSFUL = {"vendor": "NSING", "name": "N32G032_DFP", "version": "0.2.2", "svd_name": "N32G032"}
-
 ACCEPTED_DIFFERENCES = [
     # svd content: <peripheral derivedFrom="DMA1"><name>DMA2</name><description/><groupName/>
     # SVDConv wrongly accepts <groupName/> as a valid group name and doesn't inherhit the real group name from DMA1
@@ -86,20 +84,6 @@ def is_accepted_difference(svd_meta: SVDMeta) -> bool:
     return False
 
 
-def skip_to_untested(svd_meta_list: list[SVDMeta]) -> list[SVDMeta]:
-    if "LAST_SUCCESSFUL" in globals():
-        for index, svd_meta in enumerate(svd_meta_list):
-            if (
-                LAST_SUCCESSFUL["vendor"] == svd_meta.vendor  # pylint: disable=E0602  #pyright: ignore
-                and LAST_SUCCESSFUL["name"] == svd_meta.name  # pylint: disable=E0602  #pyright: ignore
-                and LAST_SUCCESSFUL["version"] == svd_meta.version  # pylint: disable=E0602  #pyright: ignore
-                and LAST_SUCCESSFUL["svd_name"] == svd_meta.svd  # pylint: disable=E0602  #pyright: ignore
-            ):
-                return svd_meta_list[index + 1 :]
-
-    return svd_meta_list
-
-
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -111,10 +95,7 @@ def main() -> None:
 
     logging.basicConfig(level=logging.INFO)
 
-    # skip all svd files until the last successful one if LAST_SUCCESSFUL is defined
-    svd_meta_list = skip_to_untested(args.svd_meta_list)
-
-    for svd_meta in svd_meta_list:
+    for svd_meta in args.svd_meta_list:
         logging.info("Processing %s", svd_meta.path)
 
         svdconv_peripherals = parse_svdconv_output(svd_meta.path)
