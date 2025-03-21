@@ -1,0 +1,1640 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index e7c2fe8a..d0e7e11c 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -151,7 +151,7 @@ set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_DEFAULT}")
+ set(CMAKE_EXE_LINKER_FLAGS_DEBUG "")
+ 
+ # Apply patch on submodules
+-apply_patch(${CMAKE_CURRENT_SOURCE_DIR}/external/json)
++# apply_patch(${CMAKE_CURRENT_SOURCE_DIR}/external/json)
+ apply_patch(${CMAKE_CURRENT_SOURCE_DIR}/external/json-schema-validator)
+ apply_patch(${CMAKE_CURRENT_SOURCE_DIR}/external/cxxopts)
+ apply_patch(${CMAKE_CURRENT_SOURCE_DIR}/external/xerces-c)
+diff --git a/tools/svdconv/SVDConv/CMakeLists.txt b/tools/svdconv/SVDConv/CMakeLists.txt
+index dd457ba7..56a280c6 100644
+--- a/tools/svdconv/SVDConv/CMakeLists.txt
++++ b/tools/svdconv/SVDConv/CMakeLists.txt
+@@ -28,7 +28,7 @@ list(TRANSFORM LIB_HEADER_FILES PREPEND include/)
+ # Create the 'library' containing all of the pack check code except main()
+ add_library(svdconvlib OBJECT ${LIB_SOURCE_FILES} ${LIB_HEADER_FILES})
+ target_include_directories(svdconvlib
+-  PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include/
++  PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include/ ${CMAKE_SOURCE_DIR}/external/json/include
+   PRIVATE ${PROJECT_BINARY_DIR}/
+ )
+ 
+@@ -55,7 +55,8 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" OR
+   target_link_options(svdconv PUBLIC "-static")
+ endif()
+ 
+-target_link_libraries(svdconv PUBLIC svdconvlib)
++target_link_libraries(svdconv PUBLIC svdconvlib nlohmann_json::nlohmann_json)
++target_include_directories(svdconv PUBLIC ${CMAKE_SOURCE_DIR}/external/json/include)
+ 
+ add_custom_target(svdconvdist COMMAND
+     ${CMAKE_COMMAND} -E tar "cvf${CMAKE_TAR_FLAGS}"
+diff --git a/tools/svdconv/SVDConv/include/ParseOptions.h b/tools/svdconv/SVDConv/include/ParseOptions.h
+index db1f16bf..80aae97b 100644
+--- a/tools/svdconv/SVDConv/include/ParseOptions.h
++++ b/tools/svdconv/SVDConv/include/ParseOptions.h
+@@ -43,6 +43,8 @@ protected:
+   bool ConfigureProgramName(std::string programPath);
+   bool CreateArgumentString(int argc, const char* argv[]);
+   bool SetQuiet();
++  bool SetDebugOutputText();
++  bool SetDebugOutputJson();
+   bool SetNoCleanup();
+   bool SetUnderTest();
+   bool SetAllowSuppressError();
+diff --git a/tools/svdconv/SVDConv/include/SVDConv.h b/tools/svdconv/SVDConv/include/SVDConv.h
+index c1668c82..6938a720 100644
+--- a/tools/svdconv/SVDConv/include/SVDConv.h
++++ b/tools/svdconv/SVDConv/include/SVDConv.h
+@@ -7,10 +7,15 @@
+ #define SvdConv_H
+ 
+ #include "SvdOptions.h"
++#include "SvdDevice.h"
+ #include "ErrLog.h"
++#include <nlohmann/json.hpp>
+ 
+ #include <string>
+ #include <set>
++#include <list>
++
++using json = nlohmann::json;
+ 
+ 
+ typedef enum SvdErr_t
+@@ -32,6 +37,34 @@ public:
+   int Check(int argc, const char* argv[], const char* envp[]);
+   SVD_ERR CheckSvdFile();
+ 
++  void PrintDevice(SvdDevice *device);
++  void PrintPeripheral(SvdPeripheral *const peri, const std::list<SvdInterrupt *> &interrupts);
++  void PrintRegistersContainer(SvdPeripheral *const peri);
++  void PrintRegistersClusters(const std::list<SvdItem *> &childs, int indent);
++  void PrintRegisterWrapper(SvdRegister *reg, int indent);
++  void PrintFieldWrapper(SvdField *const field, int indent);
++  void PrintEnumContainerWrapper(SvdEnumContainer *const enumContainer, int indent);
++  void PrintEnum(SvdEnum *const &enum_, int indent);
++  void PrintEnumContainer(SvdEnumContainer *const enumContainer, int indent);
++  void PrintClusterWrapper(SvdCluster *cluster, int indent);
++  void PrintCluster(SvdCluster *cluster, int indent);
++  void PrintRegister(SvdRegister *reg, int indent);
++  void PrintInterrupts(const std::list<SvdInterrupt *> &interrupts);
++  void PrintAddressBlocks(SvdPeripheral *const peri);
++  void PrintField(SvdField *field, int indent);
++
++  json PeripheralToJson(SvdPeripheral *const peri, const std::list<SvdInterrupt *> &interrupts);
++  json AddressBlocksToJson(SvdPeripheral *const peri);
++  json InterruptsToJson(const std::list<SvdInterrupt *> &interrupts);
++  json RegistersContainerToJson(SvdPeripheral *const peri);
++  json RegistersClustersToJson(const std::__cxx11::list<SvdItem *> &registersClusters);
++  json RegisterToJson(SvdRegister *reg);
++  json ClusterToJson(SvdCluster *cluster);
++  json FieldToJson(SvdField *field);
++  json EnumContainerToJson(SvdEnumContainer *const enumContainer);
++  json EnumToJson(SvdEnum *const &enum_);
++  void PrintDeviceJson(SvdDevice *device);
++
+ protected:
+   bool InitMessageTable();
+ 
+diff --git a/tools/svdconv/SVDConv/include/SvdOptions.h b/tools/svdconv/SVDConv/include/SvdOptions.h
+index f2b36e05..459c2e7f 100644
+--- a/tools/svdconv/SVDConv/include/SvdOptions.h
++++ b/tools/svdconv/SVDConv/include/SvdOptions.h
+@@ -56,6 +56,8 @@ public:
+   void SetCreateFolder          (bool bCreateFolder             = true)   { m_bCreateFolder           = bCreateFolder           ; }
+   void SetShowMissingEnums      (bool bShowMissingEnums         = true)   { m_bShowMissingEnums       = bShowMissingEnums       ; }
+   void SetUnderTest             (bool bUnderTest                = true)   { m_bUnderTest              = bUnderTest              ; }
++  void SetDebugOutputModeText   (bool bDebugOutputModeText      = true)   { m_bDebugOutputModeText    = bDebugOutputModeText    ; }
++  void SetDebugOutputModeJson   (bool bDebugOutputModeJson      = true)   { m_bDebugOutputModeJson    = bDebugOutputModeJson    ; }
+   void SetNoCleanup             (bool bNoCleanup                = true)   { m_bNoCleanup              = bNoCleanup              ; }
+   void SetDebugStruct           (bool bDebugStruct              = true)   { m_bDebugStruct            = bDebugStruct            ; }
+   void SetDebugHeaderfile       (bool bDebugHeaderfile          = true)   { m_bDebugHeaderfile        = bDebugHeaderfile        ; }
+@@ -77,6 +79,8 @@ public:
+   bool IsCreateFolder           () const  { return m_bCreateFolder           ; }
+   bool IsShowMissingEnums       () const  { return m_bShowMissingEnums       ; }
+   bool IsUnderTest              () const  { return m_bUnderTest              ; }
++  bool IsDebugOutputModeText    () const  { return m_bDebugOutputModeText    ; }
++  bool IsDebugOutputModeJson    () const  { return m_bDebugOutputModeJson    ; }
+   bool IsNoCleanup              () const  { return m_bNoCleanup              ; }
+   bool IsDebugStruct            () const  { return m_bDebugStruct            ; }
+   bool IsDebugHeaderfile        () const  { return m_bDebugHeaderfile        ; }
+@@ -104,6 +108,8 @@ private:
+   bool m_bCreateFolder = false;
+   bool m_bShowMissingEnums = false;
+   bool m_bUnderTest = false;
++  bool m_bDebugOutputModeText = false;
++  bool m_bDebugOutputModeJson = false;
+   bool m_bNoCleanup = false;
+   bool m_bDebugStruct = false;
+   bool m_bDebugHeaderfile = false;
+diff --git a/tools/svdconv/SVDConv/src/ParseOptions.cpp b/tools/svdconv/SVDConv/src/ParseOptions.cpp
+index 96ecb76b..e6d89c8f 100644
+--- a/tools/svdconv/SVDConv/src/ParseOptions.cpp
++++ b/tools/svdconv/SVDConv/src/ParseOptions.cpp
+@@ -208,6 +208,20 @@ bool ParseOptions::SetQuiet()
+   return true;
+ }
+ 
++bool ParseOptions::SetDebugOutputText()
++{
++  m_options.SetDebugOutputModeText();
++
++  return true;
++}
++
++bool ParseOptions::SetDebugOutputJson()
++{
++  m_options.SetDebugOutputModeJson();
++
++  return true;
++}
++
+ bool ParseOptions::SetNoCleanup()
+ {
+   m_options.SetNoCleanup();
+@@ -421,6 +435,8 @@ ParseOptions::Result ParseOptions::ParseOpts(int argc, const char* argv[])
+       ( "under-test"            , "Use when running in cloud environment"                     , cxxopts::value<bool>()->default_value("false") )
+       ( "nocleanup"             , "Do not delete intermediate files"                          , cxxopts::value<bool>()->default_value("false") )
+       ( "quiet"                 , "No output on console"                                      , cxxopts::value<bool>()->default_value("false") )
++      ( "debug-output-text"     , "Add debug output in text format"                           , cxxopts::value<bool>()->default_value("false") )
++      ( "debug-output-json"     , "Add debug output in json format"                           , cxxopts::value<bool>()->default_value("false") )
+       ( "debug"                 , "Add information to generated files: struct/header/sfd/break" , cxxopts::value<std::vector<std::string>>() )
+       ( "n"                     , "SFD Output file name"                                      , cxxopts::value<string>() )
+       ( "V,version"               , "Show program version")
+@@ -444,6 +460,16 @@ ParseOptions::Result ParseOptions::ParseOpts(int argc, const char* argv[])
+         bOk = false;
+       }
+     }
++    if(parseResult.count("debug-output-text")) {
++      if(!SetDebugOutputText()) {
++        bOk = false;
++      }
++    }
++    if(parseResult.count("debug-output-json")) {
++      if(!SetDebugOutputJson()) {
++        bOk = false;
++      }
++    }
+     if(parseResult.count("create-folder")) {
+       if(!SetCreateFolder()) {
+         bOk = false;
+diff --git a/tools/svdconv/SVDConv/src/SVDConv.cpp b/tools/svdconv/SVDConv/src/SVDConv.cpp
+index c149f70f..c3b37f43 100644
+--- a/tools/svdconv/SVDConv/src/SVDConv.cpp
++++ b/tools/svdconv/SVDConv/src/SVDConv.cpp
+@@ -5,16 +5,27 @@
+  */
+ #include "SVDConv.h"
+ #include "SvdOptions.h"
++#include "SvdTypes.h"
+ #include "XMLTreeSlim.h"
+ #include "ErrLog.h"
+ #include "ErrOutputterSaveToStdoutOrFile.h"
+ #include "SvdModel.h"
+ #include "SvdDevice.h"
+ #include "SvdGenerator.h"
++#include "SvdPeripheral.h"
++#include "SvdAddressBlock.h"
++#include "SvdInterrupt.h"
++#include "SvdRegister.h"
++#include "SvdCluster.h"
++#include "SvdDimension.h"
++#include "SvdField.h"
++#include "SvdEnum.h"
+ #include "RteFsUtils.h"
+ #include "CrossPlatformUtils.h"
+ #include "ProductInfo.h"
+ #include "ParseOptions.h"
++#include "EnumStringTables.h"
++#include <nlohmann/json.hpp>
+ 
+ #include <ostream>
+ #include <string>
+@@ -22,11 +33,343 @@
+ #include <list>
+ #include <map>
+ #include <csignal>
++#include <bitset>
+ 
+ using namespace std;
++using json = nlohmann::json;
++
++#define WHITESPACES 4
+ 
+ SvdModel* m_svdModel;
+ 
++std::ostream& operator<<(std::ostream& os, const SvdTypes::Access& access) {
++  switch (access) {
++    case SvdTypes::Access::UNDEF:
++      os << "UNDEF";
++      break;
++    case SvdTypes::Access::READONLY:
++      os << "READ_ONLY";
++      break;
++    case SvdTypes::Access::WRITEONLY:
++      os << "WRITE_ONLY";
++      break;
++    case SvdTypes::Access::READWRITE:
++      os << "READ_WRITE";
++      break;
++    case SvdTypes::Access::WRITEONCE:
++      os << "WRITE_ONCE";
++      break;
++    case SvdTypes::Access::READWRITEONCE:
++      os << "READ_WRITE_ONCE";
++      break;
++    case SvdTypes::Access::END:
++      os << "END";
++      break;
++    default:
++      os << "UNKNOWN";
++      break;
++  }
++  return os;
++}
++
++std::ostream& operator<<(std::ostream& os, const SvdTypes::ProtectionType& protection) {
++  switch (protection) {
++    case SvdTypes::ProtectionType::UNDEF:
++      os << "UNDEF";
++      break;
++    case SvdTypes::ProtectionType::NONSECURE:
++      os << "NONSECURE";
++      break;
++    case SvdTypes::ProtectionType::SECURE:
++      os << "SECURE";
++      break;
++    case SvdTypes::ProtectionType::PRIVILEGED:
++      os << "PRIVILEGED";
++      break;
++    default:
++      os << "UNKNOWN";
++      break;
++  }
++  return os;
++}
++
++std::ostream& operator<<(std::ostream& os, const SvdTypes::SauAccessType& access) {
++  switch (access) {
++    case SvdTypes::SauAccessType::UNDEF:
++      os << "UNDEF";
++      break;
++    case SvdTypes::SauAccessType::NONSECURE:
++      os << "NONSECURE";
++      break;
++    case SvdTypes::SauAccessType::SECURE:
++      os << "SECURE";
++      break;
++    default:
++      os << "UNKNOWN";
++      break;
++  }
++  return os;
++}
++
++std::ostream& operator<<(std::ostream& os, const SvdTypes::Expression& expr) {
++  switch (expr) {
++    case SvdTypes::Expression::UNDEF:
++      os << "UNDEF";
++      break;
++    case SvdTypes::Expression::NONE:
++      os << "NONE";
++      break;
++    case SvdTypes::Expression::EXTEND:
++      os << "EXTEND";
++      break;
++    case SvdTypes::Expression::ARRAY:
++      os << "ARRAY";
++      break;
++    case SvdTypes::Expression::INVALID:
++      os << "INVALID";
++      break;
++    case SvdTypes::Expression::ARRAYINVALID:
++      os << "ARRAYINVALID";
++      break;
++    default:
++      os << "UNKNOWN";
++      break;
++  }
++  return os;
++}
++
++std::ostream& operator<<(std::ostream& os, const SvdTypes::AddrBlockUsage& usage) {
++  switch (usage) {
++    case SvdTypes::AddrBlockUsage::UNDEF:
++      os << "UNDEF";
++      break;
++    case SvdTypes::AddrBlockUsage::REGISTERS:
++      os << "REGISTERS";
++      break;
++    case SvdTypes::AddrBlockUsage::BUFFER:
++      os << "BUFFER";
++      break;
++    case SvdTypes::AddrBlockUsage::RESERVED:
++      os << "RESERVED";
++      break;
++    default:
++      os << "UNKNOWN";
++      break;
++  }
++  return os;
++}
++
++std::ostream& operator<<(std::ostream& os, const SvdTypes::Endian& endian) {
++  switch (endian) {
++    case SvdTypes::Endian::UNDEF:
++      os << "UNDEF";
++      break;
++    case SvdTypes::Endian::LITTLE:
++      os << "LITTLE";
++      break;
++    case SvdTypes::Endian::BIG:
++      os << "BIG";
++      break;
++    case SvdTypes::Endian::SELECTABLE:
++      os << "SELECTABLE";
++      break;
++    case SvdTypes::Endian::OTHER:
++      os << "OTHER";
++      break;
++    default:
++      os << "UNKNOWN";
++      break;
++  }
++  return os;
++}
++
++std::ostream& operator<<(std::ostream& os, const SvdTypes::ReadAction& action) {
++  switch (action) {
++    case SvdTypes::ReadAction::UNDEF:
++      os << "UNDEF";
++      break;
++    case SvdTypes::ReadAction::CLEAR:
++      os << "CLEAR";
++      break;
++    case SvdTypes::ReadAction::SET:
++      os << "SET";
++      break;
++    case SvdTypes::ReadAction::MODIFY:
++      os << "MODIFY";
++      break;
++    case SvdTypes::ReadAction::MODIFEXT:
++      os << "MODIFEXT";
++      break;
++    default:
++      os << "UNKNOWN";
++      break;
++  }
++  return os;
++}
++
++std::ostream& operator<<(std::ostream& os, const SvdTypes::EnumUsage& usage) {
++  switch (usage) {
++    case SvdTypes::EnumUsage::UNDEF:
++      os << "UNDEF";
++      break;
++    case SvdTypes::EnumUsage::READ:
++      os << "READ";
++      break;
++    case SvdTypes::EnumUsage::WRITE:
++      os << "WRITE";
++      break;
++    case SvdTypes::EnumUsage::READWRITE:
++      os << "READWRITE";
++      break;
++    default:
++      os << "UNKNOWN";
++      break;
++  }
++  return os;
++}
++
++std::ostream& operator<<(std::ostream& os, const SvdTypes::SvdConvV2accType& accType) {
++  switch (accType) {
++    case SvdTypes::SvdConvV2accType::EMPTY:
++      os << "EMPTY";
++      break;
++    case SvdTypes::SvdConvV2accType::READ:
++      os << "READ";
++      break;
++    case SvdTypes::SvdConvV2accType::READONLY:
++      os << "READONLY";
++      break;
++    case SvdTypes::SvdConvV2accType::WRITE:
++      os << "WRITE";
++      break;
++    case SvdTypes::SvdConvV2accType::WRITEONLY:
++      os << "WRITEONLY";
++      break;
++    case SvdTypes::SvdConvV2accType::READWRITE:
++      os << "READWRITE";
++      break;
++    case SvdTypes::SvdConvV2accType::UNDEF:
++      os << "UNDEF";
++      break;
++    default:
++      os << "UNKNOWN";
++      break;
++  }
++  return os;
++}
++
++std::ostream& operator<<(std::ostream& os, const SvdTypes::CpuIrqNum& irqNum) {
++  switch (irqNum) {
++    case SvdTypes::CpuIrqNum::IRQ0:
++      os << "IRQ0";
++      break;
++    case SvdTypes::CpuIrqNum::IRQ1:
++      os << "IRQ1";
++      break;
++    case SvdTypes::CpuIrqNum::IRQ2:
++      os << "IRQ2";
++      break;
++    case SvdTypes::CpuIrqNum::IRQ3:
++      os << "IRQ3";
++      break;
++    case SvdTypes::CpuIrqNum::IRQ4:
++      os << "IRQ4";
++      break;
++    case SvdTypes::CpuIrqNum::IRQ5:
++      os << "IRQ5";
++      break;
++    case SvdTypes::CpuIrqNum::IRQ6:
++      os << "IRQ6";
++      break;
++    case SvdTypes::CpuIrqNum::IRQ7:
++      os << "IRQ7";
++      break;
++    case SvdTypes::CpuIrqNum::IRQ8:
++      os << "IRQ8";
++      break;
++    case SvdTypes::CpuIrqNum::IRQ9:
++      os << "IRQ9";
++      break;
++    case SvdTypes::CpuIrqNum::IRQ10:
++      os << "IRQ10";
++      break;
++    case SvdTypes::CpuIrqNum::IRQ11:
++      os << "IRQ11";
++      break;
++    case SvdTypes::CpuIrqNum::IRQ12:
++      os << "IRQ12";
++      break;
++    case SvdTypes::CpuIrqNum::IRQ13:
++      os << "IRQ13";
++      break;
++    case SvdTypes::CpuIrqNum::IRQ14:
++      os << "IRQ14";
++      break;
++    case SvdTypes::CpuIrqNum::IRQ15:
++      os << "IRQ15";
++      break;
++    case SvdTypes::CpuIrqNum::IRQ_END:
++      os << "IRQ_END";
++      break;
++    case SvdTypes::CpuIrqNum::IRQ_RESERVED:
++      os << "IRQ_RESERVED";
++      break;
++    case SvdTypes::CpuIrqNum::IRQ_UNDEF:
++      os << "IRQ_UNDEF";
++      break;
++    default:
++      os << "UNKNOWN";
++      break;
++  }
++  return os;
++}
++
++std::ostream& operator<<(std::ostream& os, const SvdTypes::ModifiedWriteValue& modWriteVal) {
++  switch (modWriteVal) {
++    case SvdTypes::ModifiedWriteValue::UNDEF:
++      os << "undefined";
++      break;
++    case SvdTypes::ModifiedWriteValue::ONETOCLEAR:
++      os << "oneToClear";
++      break;
++    case SvdTypes::ModifiedWriteValue::ONETOSET:
++      os << "oneToSet";
++      break;
++    case SvdTypes::ModifiedWriteValue::ONETOTOGGLE:
++      os << "oneToToggle";
++      break;
++    case SvdTypes::ModifiedWriteValue::ZEROTOCLEAR:
++      os << "zeroToClear";
++      break;
++    case SvdTypes::ModifiedWriteValue::ZEROTOSET:
++      os << "zeroToSet";
++      break;
++    case SvdTypes::ModifiedWriteValue::ZEROTOTOGGLE:
++      os << "zeroToToggle";
++      break;
++    case SvdTypes::ModifiedWriteValue::CLEAR:
++      os << "clear";
++      break;
++    case SvdTypes::ModifiedWriteValue::SET:
++      os << "set";
++      break;
++    case SvdTypes::ModifiedWriteValue::MODIFY:
++      os << "modify";
++      break;
++    default:
++      os << "UNKNOWN";
++      break;
++  }
++  return os;
++}
++
++template <typename T>
++std::string toString(const T& value)
++{
++    std::ostringstream oss;
++    oss << value;
++    return oss.str();
++}
+ 
+ /**
+  * @brief exception handler for other than C++/STL exceptions
+@@ -362,6 +705,15 @@ SVD_ERR SvdConv::CheckSvdFile()
+ 	  else        { LogMsg("M111", NAME("Generate System Viewer SFR File"));           }
+   }
+ 
++
++  if(m_svdOptions.IsDebugOutputModeText()) {
++    PrintDevice(device);
++  }
++
++  if(m_svdOptions.IsDebugOutputModeJson()) {
++    PrintDeviceJson(device);
++  }
++
+   // ----------------------  Delete Generator  ----------------------
+   delete generator;
+ 
+@@ -378,3 +730,596 @@ SVD_ERR SvdConv::CheckSvdFile()
+ 
+   return svdRes;
+ }
++
++void SvdConv::PrintPeripheral(SvdPeripheral *const peri, const std::__cxx11::list<SvdInterrupt *> &interrupts)
++{
++  cout << "=== Peripheral " << peri->GetNameCalculated() << " ===" << endl;
++  cout << "version: " << peri->GetVersion() << endl;
++  // cout << "description: " << peri->GetDescription() << endl;
++  cout << "alternatePeripheral: " << peri->GetAlternate() << endl;
++  cout << "groupName: " << peri->GetGroupName() << endl;
++  cout << "prependToName: " << peri->GetPrependToName() << endl;
++  cout << "appendToName: " << peri->GetAppendToName() << endl;
++  cout << "headerStructName: " << peri->GetHeaderStructName() << endl;
++  
++  if (peri->GetDisableCondition())
++    cout << "disableCondition: " << peri->GetDisableCondition()->GetExpressionString() << endl;
++  else 
++    cout << "disableCondition: " << "NULL" << endl;
++  
++  cout << "baseAddress: 0x" << hex << peri->GetAddress() << dec << endl;
++  cout << "size: " << peri->GetBitWidth() << endl;
++  cout << "size effective: " << peri->GetEffectiveBitWidth() << endl;
++  cout << "access: " << peri->GetEffectiveAccess() << endl;
++  cout << "protection: " << peri->GetEffectiveProtection() << endl;
++  cout << "resetValue: 0x" << hex << peri->GetEffectiveResetValue() << dec << endl;
++  cout << "resetMask: 0x" << hex << peri->GetEffectiveResetMask() << dec << endl;
++  cout << "\n";
++  cout << "Absolute Address: 0x" << hex << peri->GetAbsoluteAddress() << dec << endl;
++  cout << "Hierarchical Name: " << peri->GetHierarchicalNameResulting() << endl;
++  cout << "\n";
++  
++  PrintAddressBlocks(peri);
++  PrintInterrupts(interrupts);
++  PrintRegistersContainer(peri);
++  cout << "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n\n";
++}
++
++void SvdConv::PrintAddressBlocks(SvdPeripheral *const peri)
++{
++  const auto &addrBlocks = peri->GetAddressBlocks();
++  for (const auto &addrBlock : addrBlocks)
++  {
++    cout << "Address Block:" << endl;
++    cout << "  Offset: 0x" << hex << addrBlock->GetOffset() << dec << endl;
++    cout << "  Size: " << addrBlock->GetSize() << endl;
++    cout << "  Usage: " << addrBlock->GetUsage() << endl;
++    cout << "  Protection: " << addrBlock->GetProtection() << endl;
++  }
++  cout << "\n";
++}
++
++void SvdConv::PrintInterrupts(const std::__cxx11::list<SvdInterrupt *> &interrupts)
++{
++  for (const auto &interrupt : interrupts)
++  {
++    cout << "Interrupt:" << endl;
++    cout << "  Name: " << interrupt->GetNameCalculated() << endl;
++    // cout << "  Description: " << interrupt->GetDescription() << endl;
++    cout << "  Value: " << interrupt->GetValue() << endl;
++  }
++  cout << "\n";
++}
++
++void SvdConv::PrintCluster(SvdCluster *cluster, int numSpaces)
++{
++  std::string space(numSpaces, ' ');
++
++  cout << space << "=== Cluster " << cluster->GetNameCalculated() << " ===" << endl;
++  // cout << space << "description: " << cluster->GetDescription() << endl;
++  cout << space << "alternateCluster: " << cluster->GetAlternate() << endl;
++  cout << space << "headerStructName: " << cluster->GetHeaderStructName() << endl;
++  cout << space << "addressOffset: 0x" << hex << cluster->GetOffset() << dec << endl;
++  cout << space << "size: " << cluster->GetBitWidth() << endl;
++  cout << space << "size effective: " << cluster->GetEffectiveBitWidth() << endl;
++  cout << space << "access: " << cluster->GetEffectiveAccess() << endl;
++  cout << space << "protection: " << cluster->GetEffectiveProtection() << endl;
++  cout << space << "resetValue: 0x" << hex << cluster->GetEffectiveResetValue() << dec << endl;
++  cout << space << "resetMask: 0x" << hex << cluster->GetEffectiveResetMask() << dec << endl;
++  cout << space << "\n";
++  cout << space << "Absolute Address: 0x" << hex << cluster->GetAbsoluteAddress() << dec << endl;
++  cout << space << "Hierarchical Name: " << cluster->GetHierarchicalNameResulting() << endl;
++  cout << space << "\n";
++}
++
++void SvdConv::PrintRegister(SvdRegister *reg, int numSpaces)
++{
++  std::string space(numSpaces, ' ');
++
++  cout << space << "=== Register " << reg->GetNameCalculated() << " (with prepend & append: " << reg->GetHeaderFileName() << ")" " ===" << endl;
++  cout << space << "displayName: " << reg->GetDisplayName() << endl;
++  // cout << space << "description: " << reg->GetDescription() << endl;
++  cout << space << "alternateGroup: " << reg->GetAlternateGroup() << endl;
++  cout << space << "alternateRegister: " << reg->GetAlternate() << endl;
++  cout << space << "addressOffset: 0x" << hex << reg->GetOffset() << dec << endl;
++  cout << space << "size: " << reg->GetBitWidth() << endl;
++  cout << space << "size effective: " << reg->GetEffectiveBitWidth() << endl;
++  cout << space << "access: " << reg->GetEffectiveAccess() << endl;
++  cout << space << "protection: " << reg->GetEffectiveProtection() << endl;
++  cout << space << "resetValue: 0x" << hex << reg->GetEffectiveResetValue() << dec << endl;
++  cout << space << "resetMask: 0x" << hex << reg->GetEffectiveResetMask() << dec << endl;
++  cout << space << "dataType: " << reg->GetDataType() << endl;
++  cout << space << "modifiedWriteValues: " << reg->GetModifiedWriteValue() << endl;
++  cout << space << "writeConstraint: " << (reg->HasWriteConstraint() ? "yes" : "no") << endl;
++  cout << space << "readAction: " << reg->GetReadAction() << endl;
++  cout << space << "\n";
++  cout << space << "Absolute Address: 0x" << hex << reg->GetAbsoluteAddress() << dec << endl;
++  cout << space << "Hierarchical Name: " << reg->GetHierarchicalNameResulting() << endl;
++  cout << space << "\n";
++}
++
++void SvdConv::PrintField(SvdField *field, int numSpaces)
++{
++  std::string space(numSpaces, ' ');
++
++  cout << space << "=== Field " << field->GetNameCalculated() << " ===" << endl; 
++  // cout << space << "description: " << field->GetDescription() << endl;
++  cout << space << "bitOffset: " << field->GetOffset() << endl;
++  cout << space << "bitWidth: " << field->GetBitWidth() << endl;
++  cout << space << "access: " << field->GetEffectiveAccess() << endl;
++  cout << space << "modifiedWriteValues: " << field->GetModifiedWriteValue() << endl;
++  cout << space << "writeConstraint: " << (field->HasWriteConstraint() ? "yes" : "no") << endl;
++  cout << space << "readAction: " << field->GetReadAction() << endl;
++  cout << space << "\n";
++  cout << space << "Hierarchical Name: " << field->GetHierarchicalNameResulting() << endl;
++  cout << space << "\n";
++}
++
++void SvdConv::PrintEnumContainer(SvdEnumContainer *const enumContainer, int numSpaces)
++{
++  std::string space(numSpaces, ' ');
++  cout << space << "=== Enum Container: " << enumContainer->GetName() << " ===" << endl;
++  cout << space << "headerEnumName: " << enumContainer->GetHeaderEnumName() << endl;
++  cout << space << "usage: " << enumContainer->GetUsage() << endl;
++  cout << space << "Hierarchical Name: " << enumContainer->GetHierarchicalNameResulting() << endl;
++}
++
++void SvdConv::PrintEnum(SvdEnum *const &enum_, int numSpaces)
++{
++  std::string space(numSpaces, ' ');
++
++  cout << space << "Enum:" << endl;
++  cout << space << "  name: " << enum_->GetNameCalculated() << endl;
++  // cout << space << "  description: " << enum_->GetDescription() << endl;
++  cout << space << "  value: 0b" << bitset<32>(enum_->GetValue().u32) << endl;
++  cout << space << "  isDefault: " << boolalpha << enum_->IsDefault() << noboolalpha << endl;
++  cout << space << "  Hierarchical Name: " << enum_->GetHierarchicalNameResulting() << endl;
++  cout << space << "\n";
++}
++
++void SvdConv::PrintDevice(SvdDevice *device)
++{
++  const auto periCont = device->GetPeripheralContainer();
++  const auto &periContChilds = periCont->GetChildren();
++  for (const auto periSvdItem : periContChilds) {
++    if(!periSvdItem || !periSvdItem->IsValid()) {
++      continue;
++    }
++    
++    const auto peri = dynamic_cast<SvdPeripheral *>(periSvdItem);
++    const auto dim = periSvdItem->GetDimension();
++    if(dim) {
++      const auto &dimChild = dim->GetChildren();
++      for (const auto child : dimChild) {
++        if(!child || !child->IsValid()) {
++          continue;
++        }
++
++        const auto peri_ = dynamic_cast<SvdPeripheral *>(child);
++        PrintPeripheral(peri_, peri->GetInterrupt());
++      }
++    } else {
++      PrintPeripheral(peri, peri->GetInterrupt());
++    }
++  }
++}
++
++void SvdConv::PrintRegistersContainer(SvdPeripheral *const peri)
++{
++  const auto regCont = peri->GetRegisterContainer();
++  const auto &childs = regCont->GetChildren();
++  PrintRegistersClusters(childs, WHITESPACES);
++}
++
++void SvdConv::PrintRegistersClusters(const std::__cxx11::list<SvdItem *> &registersClusters, int numSpaces)
++{
++  for (const auto registerCluster : registersClusters) {
++    if (!registerCluster || !registerCluster->IsValid()) {
++      continue;
++    }
++
++    if (auto reg = dynamic_cast<SvdRegister *>(registerCluster))
++    {
++      const auto dim = reg->GetDimension();
++      if(dim) {
++        const auto &dimChilden = dim->GetChildren();
++        for (const auto child : dimChilden) {
++          if(!child || !child->IsValid()) {
++            continue;
++          }
++
++          const auto reg_ = dynamic_cast<SvdRegister *>(child);
++          PrintRegisterWrapper(reg_, numSpaces);
++        }
++      } else {
++        PrintRegisterWrapper(reg, numSpaces);
++      }
++    }
++    else if (auto cluster = dynamic_cast<SvdCluster *>(registerCluster))
++    {
++      const auto dim = cluster->GetDimension();
++      if(dim) {
++        const auto &dimChilden = dim->GetChildren();
++        for (const auto child : dimChilden) {
++          if(!child || !child->IsValid()) {
++            continue;
++          }
++
++          const auto cluster_ = dynamic_cast<SvdCluster *>(child);
++          PrintClusterWrapper(cluster_, numSpaces);
++        }
++      } else {
++        PrintClusterWrapper(cluster, numSpaces);
++      }
++    }
++  }
++}
++
++void SvdConv::PrintRegisterWrapper(SvdRegister *reg, int numSpaces)
++{
++  PrintRegister(reg, numSpaces);
++
++  const auto fieldCont = reg->GetFieldContainer();
++  if (!fieldCont || !fieldCont->IsValid()) {
++    return;
++  }
++
++  const auto &regContChilds = fieldCont->GetChildren();
++  for (const auto regContChild : regContChilds)
++  {
++    if(!regContChild || !regContChild->IsValid()) {
++      continue;
++    }
++
++    const auto dim = regContChild->GetDimension();
++    if(dim) {
++      const auto &dimChilds = dim->GetChildren();
++      for (const auto dimChild : dimChilds) {
++        if(!dimChild || !dimChild->IsValid()) {
++          continue;
++        }
++
++        const auto field = dynamic_cast<SvdField *>(dimChild);
++        PrintFieldWrapper(field, numSpaces);
++      }
++    } else {
++      const auto field = dynamic_cast<SvdField *>(regContChild);
++      PrintFieldWrapper(field, numSpaces + WHITESPACES);
++    }
++
++    cout << "\n\n";
++  }
++}
++
++void SvdConv::PrintFieldWrapper(SvdField *const field, int numSpaces)
++{
++  PrintField(field, numSpaces + WHITESPACES);
++  
++  if (field && !field->GetChildren().empty()) {
++    for(const auto &child : field->GetChildren()) {
++      if(!child || !child->IsValid()) {
++        continue;
++      }
++      
++      const auto enumContainer = dynamic_cast<SvdEnumContainer *>(child);
++      if(enumContainer) {
++        PrintEnumContainerWrapper(enumContainer, numSpaces + WHITESPACES);
++      }
++    }
++  }
++}
++
++void SvdConv::PrintEnumContainerWrapper(SvdEnumContainer *const enumContainer, int numSpaces)
++{
++  PrintEnumContainer(enumContainer, numSpaces + WHITESPACES);
++  const auto &enums = enumContainer->GetChildren();
++  for (const auto &child : enums)
++  {
++    if (!child || !child->IsValid())
++    {
++      continue;
++    }
++    const auto enum_ = dynamic_cast<SvdEnum *>(child);
++    PrintEnum(enum_, numSpaces + 2 * WHITESPACES);
++  }
++}
++
++void SvdConv::PrintClusterWrapper(SvdCluster *cluster, int numSpaces)
++{
++  PrintCluster(cluster, numSpaces);
++
++  if (cluster && !cluster->GetChildren().empty())
++  {
++    PrintRegistersClusters(cluster->GetChildren(), numSpaces + WHITESPACES);
++  }
++}
++
++json SvdConv::PeripheralToJson(SvdPeripheral *const peri, const std::list<SvdInterrupt *> &interrupts)
++{
++    json j;
++    j["name"]                = peri->GetNameCalculated();
++    j["version"]             = peri->GetVersion();
++    // j["description"]      = peri->GetDescription(); // if needed
++    j["alternatePeripheral"] = peri->GetAlternate();
++    j["groupName"]           = peri->GetGroupName();
++    j["prependToName"]       = peri->GetPrependToName();
++    j["appendToName"]        = peri->GetAppendToName();
++    j["headerStructName"]    = peri->GetHeaderStructName();
++    
++    if (peri->GetDisableCondition())
++        j["disableCondition"] = peri->GetDisableCondition()->GetExpressionString();
++    else 
++        j["disableCondition"] = "NULL";
++    
++    j["baseAddress"]         = peri->GetAddress();
++    j["size"]                = peri->GetBitWidth();
++    j["sizeEffective"]       = peri->GetEffectiveBitWidth();
++    j["access"]              = toString(peri->GetEffectiveAccess());
++    j["protection"]          = toString(peri->GetEffectiveProtection());
++    j["resetValue"]          = peri->GetEffectiveResetValue();
++    j["resetMask"]           = peri->GetEffectiveResetMask();
++    j["absoluteAddress"]     = peri->GetAbsoluteAddress();
++
++    j["addressBlocks"]  = AddressBlocksToJson(peri);
++    j["interrupts"]     = InterruptsToJson(interrupts);
++    j["registersClusters"] = RegistersContainerToJson(peri);
++
++    return j;
++}
++
++json SvdConv::AddressBlocksToJson(SvdPeripheral *const peri)
++{
++    json arr = json::array();
++    const auto &addrBlocks = peri->GetAddressBlocks();
++    for (const auto &addrBlock : addrBlocks)
++    {
++        json jBlock;
++        jBlock["offset"]     = addrBlock->GetOffset();
++        jBlock["size"]       = addrBlock->GetSize();
++        jBlock["usage"]      = toString(addrBlock->GetUsage());
++        jBlock["protection"] = toString(addrBlock->GetProtection());
++        arr.push_back(jBlock);
++    }
++    return arr;
++}
++
++json SvdConv::InterruptsToJson(const std::list<SvdInterrupt *> &interrupts)
++{
++    json arr = json::array();
++    for (const auto &intr : interrupts)
++    {
++        json jIntr;
++        jIntr["name"]  = intr->GetNameCalculated();
++        // jIntr["description"] = intr->GetDescription(); // if needed
++        jIntr["value"] = intr->GetValue();
++        arr.push_back(jIntr);
++    }
++    return arr;
++}
++
++json SvdConv::RegistersContainerToJson(SvdPeripheral *const peri)
++{
++  const auto regCont = peri->GetRegisterContainer();
++  const auto &childs = regCont->GetChildren();
++  return RegistersClustersToJson(childs);
++}
++
++json SvdConv::RegistersClustersToJson(const std::__cxx11::list<SvdItem *> &registersClusters)
++{
++  json registers_clusters_arr = json::array();
++  for (const auto registerCluster : registersClusters) {
++    if (!registerCluster || !registerCluster->IsValid()) {
++      continue;
++    }
++
++    if (auto reg = dynamic_cast<SvdRegister *>(registerCluster))
++    {
++      const auto dim = reg->GetDimension();
++      if(dim) {
++        const auto &dimChilden = dim->GetChildren();
++        for (const auto child : dimChilden) {
++          if(!child || !child->IsValid()) {
++            continue;
++          }
++
++          const auto reg_ = dynamic_cast<SvdRegister *>(child);
++          registers_clusters_arr.push_back(RegisterToJson(reg_));
++        }
++      } else {
++        registers_clusters_arr.push_back(RegisterToJson(reg));
++      }
++    }
++    else if (auto cluster = dynamic_cast<SvdCluster *>(registerCluster))
++    {
++      const auto dim = cluster->GetDimension();
++      if(dim) {
++        const auto &dimChilden = dim->GetChildren();
++        for (const auto child : dimChilden) {
++          if(!child || !child->IsValid()) {
++            continue;
++          }
++
++          const auto cluster_ = dynamic_cast<SvdCluster *>(child);
++          registers_clusters_arr.push_back(ClusterToJson(cluster_));
++        }
++      } else {
++        registers_clusters_arr.push_back(ClusterToJson(cluster));
++      }
++    }
++  }
++
++  return registers_clusters_arr;
++}
++
++json SvdConv::RegisterToJson(SvdRegister *reg)
++{
++    json j;
++    j["type"]              = "register";
++    j["name"]              = reg->SvdItem::GetNameCalculated();
++    j["displayName"]       = reg->GetDisplayName();
++    j["alternateGroup"]    = reg->GetAlternateGroup();
++    j["alternateRegister"] = reg->GetAlternate();
++    j["addressOffset"]     = reg->GetOffset();
++    j["size"]              = reg->GetBitWidth();
++    j["sizeEffective"]     = reg->GetEffectiveBitWidth();
++    j["access"]            = toString(reg->GetEffectiveAccess());
++    j["protection"]        = toString(reg->GetEffectiveProtection());
++    j["resetValue"]        = reg->GetEffectiveResetValue();
++    j["resetMask"]         = reg->GetEffectiveResetMask();
++    j["dataType"]          = reg->GetDataType();
++    j["modifiedWriteValues"]= toString(reg->GetModifiedWriteValue());
++    j["writeConstraint"]   = (reg->HasWriteConstraint() ? "yes" : "no");
++    j["readAction"]        = toString(reg->GetReadAction());
++    j["absoluteAddress"]   = reg->GetAbsoluteAddress();
++
++    // If the register has fields, add them
++    const auto fieldCont = reg->GetFieldContainer();
++    if (fieldCont && fieldCont->IsValid() && !fieldCont->GetChildren().empty())
++    {
++        json fieldsArr = json::array();
++        for (const auto child : fieldCont->GetChildren())
++        {
++            if (!child || !child->IsValid())
++                continue;
++
++            const auto dim = child->GetDimension();
++            if(dim) {
++              const auto &dimChilds = dim->GetChildren();
++              for (const auto dimChild : dimChilds) {
++                if(!dimChild || !dimChild->IsValid()) {
++                  continue;
++                }
++        
++                const auto field = dynamic_cast<SvdField *>(dimChild);
++                fieldsArr.push_back(FieldToJson(field));
++              }
++            } else {
++              const auto field = dynamic_cast<SvdField *>(child);
++              fieldsArr.push_back(FieldToJson(field));
++            }
++        }
++        j["fields"] = fieldsArr;
++    } else {
++        j["fields"] = json::array();
++    }
++    return j;
++}
++
++json SvdConv::ClusterToJson(SvdCluster *cluster)
++{
++    json j;
++    j["type"]              = "cluster";
++    j["name"]              = cluster->GetNameCalculated();
++    j["alternateCluster"]  = cluster->GetAlternate();
++    j["headerStructName"]  = cluster->GetHeaderStructName();
++    j["addressOffset"]     = cluster->GetOffset();
++    j["size"]              = cluster->GetBitWidth();
++    j["sizeEffective"]     = cluster->GetEffectiveBitWidth();
++    j["access"]            = toString(cluster->GetEffectiveAccess());
++    j["protection"]        = toString(cluster->GetEffectiveProtection());
++    j["resetValue"]        = cluster->GetEffectiveResetValue();
++    j["resetMask"]         = cluster->GetEffectiveResetMask();
++    j["absoluteAddress"]   = cluster->GetAbsoluteAddress();
++
++    // Add nested registers/clusters if any
++    if (cluster && !cluster->GetChildren().empty())
++    {
++        j["registersClusters"] = RegistersClustersToJson(cluster->GetChildren());
++    } else {
++        j["registersClusters"] = json::array();
++    }
++    return j;
++}
++
++json SvdConv::FieldToJson(SvdField *field)
++{
++    json j;
++    j["name"]         = field->GetNameCalculated();
++    j["bitOffset"]    = field->GetOffset();
++    j["bitWidth"]     = field->GetBitWidth();
++    j["access"]       = toString(field->GetEffectiveAccess());
++    j["modifiedWriteValues"] = toString(field->GetModifiedWriteValue());
++    j["writeConstraint"]     = (field->HasWriteConstraint() ? "yes" : "no");
++    j["readAction"]   = toString(field->GetReadAction());
++
++    // If the field has enum containers, add them as an array.
++    if (!field->GetChildren().empty())
++    {
++        json enumsArr = json::array();
++        for (const auto &child : field->GetChildren())
++        {
++            if (!child || !child->IsValid())
++                continue;
++            if (const auto enumContainer = dynamic_cast<SvdEnumContainer *>(child))
++            {
++                enumsArr.push_back(EnumContainerToJson(enumContainer));
++            }
++        }
++        j["enumContainers"] = enumsArr;
++    } else {
++        j["enumContainers"] = json::array();
++    }
++    return j;
++}
++
++json SvdConv::EnumContainerToJson(SvdEnumContainer *const enumContainer)
++{
++    json j;
++    j["name"]            = enumContainer->GetName();
++    j["headerEnumName"]  = enumContainer->GetHeaderEnumName();
++    j["usage"]           = toString(enumContainer->GetUsage());
++
++    // Add enums if available
++    if (!enumContainer->GetChildren().empty())
++    {
++        json enumsArr = json::array();
++        for (const auto &child : enumContainer->GetChildren())
++        {
++            if (!child || !child->IsValid())
++                continue;
++            if (const auto enum_ = dynamic_cast<SvdEnum *>(child))
++            {
++                enumsArr.push_back(EnumToJson(enum_));
++            }
++        }
++        j["enumeratedValues"] = enumsArr;
++    } else {
++        j["enumeratedValues"] = json::array();
++    }
++    return j;
++}
++
++json SvdConv::EnumToJson(SvdEnum *const &enum_)
++{
++    json j;
++    j["name"]  = enum_->GetNameCalculated();
++    // Store the bitset as a string; you could convert it to an integer if that fits your needs.
++    j["value"] = std::string("0b") + std::bitset<32>(enum_->GetValue().u32).to_string();
++    j["isDefault"] = enum_->IsDefault();
++    return j;
++}
++
++void SvdConv::PrintDeviceJson(SvdDevice *device)
++{
++    json jDevice = json::array();
++    const auto periCont = device->GetPeripheralContainer();
++    const auto &periContChilds = periCont->GetChildren();
++    for (const auto periSvdItem : periContChilds) {
++        if (!periSvdItem || !periSvdItem->IsValid())
++            continue;
++        if (auto peri = dynamic_cast<SvdPeripheral *>(periSvdItem)) {
++            const auto dim = periSvdItem->GetDimension();
++            if (dim) {
++                for (const auto child : dim->GetChildren()) {
++                    if (!child || !child->IsValid()) continue;
++                    auto peri_ = dynamic_cast<SvdPeripheral *>(child);
++                    jDevice.push_back(PeripheralToJson(peri_, peri->GetInterrupt()));
++                }
++            }
++            else {
++                jDevice.push_back(PeripheralToJson(peri, peri->GetInterrupt()));
++            }
++        }
++    }
++    std::cout << jDevice.dump(4) << std::endl;
++}
+\ No newline at end of file
+diff --git a/tools/svdconv/SVDGenerator/CMakeLists.txt b/tools/svdconv/SVDGenerator/CMakeLists.txt
+index 1c41517d..6d966b21 100644
+--- a/tools/svdconv/SVDGenerator/CMakeLists.txt
++++ b/tools/svdconv/SVDGenerator/CMakeLists.txt
+@@ -20,7 +20,7 @@ add_library(SVDGenerator STATIC ${SOURCE_FILES} ${HEADER_FILES})
+ set_property(TARGET SVDGenerator PROPERTY
+   MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+ 
+-target_include_directories(SVDGenerator PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
++target_include_directories(SVDGenerator PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/external/json/include
+                                         PRIVATE ../SVDConv/include)
+ 
+ target_link_libraries(SVDGenerator PUBLIC ErrLog SVDModel RteFsUtils RteUtils fmt)
+diff --git a/tools/svdconv/SVDModel/include/SvdCluster.h b/tools/svdconv/SVDModel/include/SvdCluster.h
+index b623559a..71b7d7d7 100644
+--- a/tools/svdconv/SVDModel/include/SvdCluster.h
++++ b/tools/svdconv/SVDModel/include/SvdCluster.h
+@@ -40,8 +40,8 @@ public:
+   const std::string&                  GetAlternate            ()                                                    { return m_alternate;           }
+   const std::string&                  GetHeaderStructName     ()                                                    { return m_headerStructName;    }
+   uint64_t                            GetOffset               ()                                                    { return m_offset;              }
+-  uint64_t                            GetResetValue           ()                                                    { return m_resetValue;          }
+-  uint64_t                            GetResetMask            ()                                                    { return m_resetMask;           }
++  std::optional<uint64_t>             GetResetValue           ()                                                    { return m_resetValue;          }
++  std::optional<uint64_t>             GetResetMask            ()                                                    { return m_resetMask;           }
+   SvdTypes::Access                    GetAccess               ()                                                    { return m_access;              }
+   SvdTypes::ModifiedWriteValue        GetModifiedWriteValues  ()                                                    { return m_modifiedWriteValues; }
+   SvdTypes::ReadAction                GetReadAction           ()                                                    { return m_readAction;          }
+@@ -49,8 +49,8 @@ public:
+   bool                                SetAlternate            (const std::string             &alternate         )   { m_alternate           = alternate          ; return true; }
+   bool                                SetHeaderStructName     (const std::string             &headerStructName  )   { m_headerStructName    = headerStructName   ; return true; }
+   bool                                SetOffset               (uint64_t                         offset          )   { m_offset              = offset             ; return true; }
+-  bool                                SetResetValue           (uint64_t                         resetValue      )   { m_resetValue          = resetValue         ; return true; }
+-  bool                                SetResetMask            (uint64_t                         resetMask       )   { m_resetMask           = resetMask          ; return true; }
++  bool                                SetResetValue           (std::optional<uint64_t>      resetValue          )   { m_resetValue          = resetValue         ; return true; }
++  bool                                SetResetMask            (std::optional<uint64_t>      resetMask           )   { m_resetMask           = resetMask          ; return true; }
+   bool                                SetAccess               (SvdTypes::Access             access              )   { m_access              = access             ; return true; }
+   bool                                SetModifiedWriteValues  (SvdTypes::ModifiedWriteValue modifiedWriteValues )   { m_modifiedWriteValues = modifiedWriteValues; return true; }
+   bool                                SetReadAction           (SvdTypes::ReadAction         readAction          )   { m_readAction          = readAction         ; return true; }
+@@ -64,8 +64,8 @@ private:
+   SvdEnumContainer               *m_enumContainer;
+   uint32_t                        m_calcSize;
+   uint64_t                        m_offset;
+-  uint64_t                        m_resetValue;
+-  uint64_t                        m_resetMask;
++  std::optional<uint64_t>         m_resetValue;
++  std::optional<uint64_t>         m_resetMask;
+   SvdTypes::Access                m_access;
+   SvdTypes::ModifiedWriteValue    m_modifiedWriteValues;
+   SvdTypes::ReadAction            m_readAction;
+diff --git a/tools/svdconv/SVDModel/include/SvdDevice.h b/tools/svdconv/SVDModel/include/SvdDevice.h
+index 5e31dd69..d7a91fa2 100644
+--- a/tools/svdconv/SVDModel/include/SvdDevice.h
++++ b/tools/svdconv/SVDModel/include/SvdDevice.h
+@@ -75,8 +75,8 @@ public:
+   const std::string&  GetHeaderSystemFilename           () { return m_headerSystemFilename   ; }
+   uint32_t            GetAddressUnitBits                () { return m_addressUnitBits        ; }
+   uint32_t            GetWidth                          () { return m_width                  ; }
+-  uint64_t            GetResetValue                     () { return m_resetValue             ; }
+-  uint64_t            GetResetMask                      () { return m_resetMask              ; }
++  std::optional<uint64_t> GetResetValue                 () { return m_resetValue             ; }
++  std::optional<uint64_t> GetResetMask                  () { return m_resetMask              ; }
+   SvdTypes::Access    GetAccess                         () { return m_access                 ; }
+ 
+   bool                SetSchemaVersion                  (const std::string& schemaVersion) { m_schemaVersion = schemaVersion; return true; }
+@@ -94,8 +94,8 @@ private:
+   bool                              m_hasAnnonUnions;
+   uint32_t                          m_addressUnitBits;
+   uint32_t                          m_width;
+-  uint64_t                          m_resetValue;
+-  uint64_t                          m_resetMask;
++  std::optional<uint64_t>           m_resetValue;
++  std::optional<uint64_t>           m_resetMask;
+   SvdTypes::Access                  m_access;
+ 
+   std::string                       m_schemaVersion;
+diff --git a/tools/svdconv/SVDModel/include/SvdField.h b/tools/svdconv/SVDModel/include/SvdField.h
+index 5f1a37ce..24b43b12 100644
+--- a/tools/svdconv/SVDModel/include/SvdField.h
++++ b/tools/svdconv/SVDModel/include/SvdField.h
+@@ -73,6 +73,7 @@ public:
+   uint32_t   GetMsb() { return m_msb;                  }
+   bool  SetLsb(uint32_t lsb) { m_lsb = lsb; return true; }
+   bool  SetMsb(uint32_t msb) { m_msb = msb; return true; }
++  bool  HasWriteConstraint() { return m_writeConstraint != nullptr; }
+ 
+ protected:
+ 
+diff --git a/tools/svdconv/SVDModel/include/SvdItem.h b/tools/svdconv/SVDModel/include/SvdItem.h
+index 1e026383..bf50fb7a 100644
+--- a/tools/svdconv/SVDModel/include/SvdItem.h
++++ b/tools/svdconv/SVDModel/include/SvdItem.h
+@@ -13,6 +13,7 @@
+ #include <string>
+ #include <list>
+ #include <map>
++#include <optional>
+ 
+ 
+ // Configuration
+@@ -151,8 +152,8 @@ public:
+   virtual uint64_t                      GetAddress                        ()                      { return 0; }
+   virtual const std::string&            GetAlternateGroup                 ()                      { return SvdUtils::EMPTY_STRING;  }
+   virtual uint32_t                      GetSize                           ()                      { return GetEffectiveBitWidth() / 8;  }
+-  virtual uint64_t                      GetResetValue                     ()                      { return 0;  }
+-  virtual uint64_t                      GetResetMask                      ()                      { return 0;  }
++  virtual std::optional<uint64_t>       GetResetValue                     ()                      { return std::nullopt;  }
++  virtual std::optional<uint64_t>       GetResetMask                      ()                      { return std::nullopt;  }
+   virtual SvdTypes::Access              GetAccess                         ()                      { return SvdTypes::Access::UNDEF;     }
+   virtual SvdTypes::ModifiedWriteValue  GetModifiedWriteValue             ()                      { return SvdTypes::ModifiedWriteValue::UNDEF;   }
+   virtual SvdTypes::ReadAction          GetReadAction                     ()                      { return SvdTypes::ReadAction::UNDEF; }
+diff --git a/tools/svdconv/SVDModel/include/SvdPeripheral.h b/tools/svdconv/SVDModel/include/SvdPeripheral.h
+index c3349c7d..85b619e9 100644
+--- a/tools/svdconv/SVDModel/include/SvdPeripheral.h
++++ b/tools/svdconv/SVDModel/include/SvdPeripheral.h
+@@ -9,6 +9,7 @@
+ #include "SvdTypes.h"
+ #include "SvdCExpression.h"
+ 
++#include <optional>
+ 
+ 
+ class SvdPeripheral;
+@@ -98,14 +99,15 @@ public:
+   const std::string&      GetHeaderStructName         () { return m_headerStructName; }
+   SvdCExpression*         GetDisableCondition         () { return m_disableCondition; }
+   uint64_t                GetAddress                  () { return m_address.u64;      }
+-  uint64_t                GetResetValue               () { return m_resetValue;       }
+-  uint64_t                GetResetMask                () { return m_resetMask;        }
++  std::optional<uint64_t> GetResetValue               () { return m_resetValue;       }
++  std::optional<uint64_t> GetResetMask                () { return m_resetMask;        }
+   SvdTypes::Access        GetAccess                   () { return m_access;           }
+   bool                    GetAddressValid             () { return m_address.bValid;   }
+   bool                    GetHasAnnonUnions           () { return m_hasAnnonUnions;   }
+   SvdEnumContainer*       GetEnumContainer            () { return m_enumContainer;    }
+-  bool                    SetHasAnnonUnions           () { m_hasAnnonUnions   = true            ;  return true; }
++  const std::list<SvdAddressBlock*>& GetAddressBlocks() const { return m_addressBlock; }
+ 
++  bool                    SetHasAnnonUnions           () { m_hasAnnonUnions   = true            ;  return true; }
+   bool                    SetVersion                  ( const std::string&  version         )  { m_version          = version         ;  return true; }
+   bool                    SetGroupName                ( const std::string&  groupName       )  { m_groupName        = groupName       ;  return true; }
+   bool                    SetHeaderStructName         ( const std::string&  headerStructName)  { m_headerStructName = headerStructName;  return true; }
+@@ -113,8 +115,8 @@ public:
+   bool                    SetPrependToName            ( const std::string&  prependToName   )  { m_prependToName    = prependToName   ;  return true; }
+   bool                    SetAppendToName             ( const std::string&  appendToName    )  { m_appendToName     = appendToName    ;  return true; }
+   bool                    SetAddress                  ( uint64_t            address         )  { m_address.u64      = address         ;  m_address.bValid = true; return true; }
+-  bool                    SetResetValue               ( uint64_t            resetValue      )  { m_resetValue       = resetValue      ;  return true; }
+-  bool                    SetResetMask                ( uint64_t            resetMask       )  { m_resetMask        = resetMask       ;  return true; }
++  bool                    SetResetValue               ( std::optional<uint64_t> resetValue  )  { m_resetValue       = resetValue      ;  return true; }
++  bool                    SetResetMask                ( std::optional<uint64_t> resetMask   )  { m_resetMask        = resetMask       ;  return true; }
+   bool                    SetAccess                   ( SvdTypes::Access    access          )  { m_access           = access          ;  return true; }
+ 
+ protected:
+@@ -124,8 +126,8 @@ private:
+   SvdCExpression*             m_disableCondition;
+   bool                        m_hasAnnonUnions;
+   uint32_t                    m_calcSize;
+-  uint64_t                    m_resetValue;
+-  uint64_t                    m_resetMask;
++  std::optional<uint64_t>     m_resetValue;
++  std::optional<uint64_t>     m_resetMask;
+   SvdTypes::Access            m_access;
+   Value                       m_address;
+   std::list<SvdAddressBlock*> m_addressBlock;
+diff --git a/tools/svdconv/SVDModel/include/SvdRegister.h b/tools/svdconv/SVDModel/include/SvdRegister.h
+index 7fe47873..00c0af57 100644
+--- a/tools/svdconv/SVDModel/include/SvdRegister.h
++++ b/tools/svdconv/SVDModel/include/SvdRegister.h
+@@ -62,8 +62,8 @@ public:
+   const std::string&            GetAlternate            () { return m_alternate;            }
+   const std::string&            GetDataType             () { return m_dataType;             }
+   uint64_t                      GetOffset               () { return m_offset;               }
+-  uint64_t                      GetResetValue           () { return m_resetValue;           }
+-  uint64_t                      GetResetMask            () { return m_resetMask;            }
++  std::optional<uint64_t>       GetResetValue           () { return m_resetValue;           }
++  std::optional<uint64_t>       GetResetMask            () { return m_resetMask;            }
+   SvdTypes::Access              GetAccess               () { return m_access;               }
+   SvdTypes::ModifiedWriteValue  GetModifiedWriteValue   () { return m_modifiedWriteValues;  }
+   SvdTypes::ReadAction          GetReadAction           () { return m_readAction;           }
+@@ -75,8 +75,8 @@ public:
+   bool                          SetAlternateGroup       (const std::string& alternateGroup              ) { m_alternateGroup      = alternateGroup;     return true; }
+   bool                          SetDataType             (const std::string& dataType                    ) { m_dataType            = dataType;           return true; }
+   bool                          SetOffset               (uint64_t offset                                ) { m_offset              = offset;             return true; }
+-  bool                          SetResetValue           (uint64_t val                                   ) { m_resetValue          = val;                return true; }
+-  bool                          SetResetMask            (uint64_t val                                   ) { m_resetMask           = val;                return true; }
++  bool                          SetResetValue           (std::optional<uint64_t> val                                   ) { m_resetValue          = val;                return true; }
++  bool                          SetResetMask            (std::optional<uint64_t> val                                   ) { m_resetMask           = val;                return true; }
+   bool                          SetAccess               (SvdTypes::Access             access            ) { m_access              = access;             return true; }
+   bool                          SetModifiedWriteValues  (SvdTypes::ModifiedWriteValue modifiedWriteValue) { m_modifiedWriteValues = modifiedWriteValue; return true; }
+   bool                          SetReadAction           (SvdTypes::ReadAction         readAction        ) { m_readAction          = readAction;         return true; }
+@@ -89,6 +89,7 @@ public:
+   bool                          CheckEnumeratedValues   ();
+   bool                          AddToMap                (SvdEnum *enu, std::map<std::string, SvdEnum*> &map);
+   bool                          CheckFields             (SvdItem* fields, uint32_t regWidth, const std::string& name);
++  bool                          HasWriteConstraint      () { return m_svdWriteConstraint != nullptr; }
+ 
+ protected:
+ 
+@@ -98,8 +99,8 @@ private:
+   bool                          m_hasValidFields;
+   bool                          m_accessMaskValid;
+   uint64_t                      m_offset;
+-  uint64_t                      m_resetValue;
+-  uint64_t                      m_resetMask;
++  std::optional<uint64_t>       m_resetValue;
++  std::optional<uint64_t>       m_resetMask;
+   uint64_t                      m_accessMaskRead;
+   uint64_t                      m_accessMaskWrite;
+   SvdTypes::Access              m_access;
+diff --git a/tools/svdconv/SVDModel/src/SvdCluster.cpp b/tools/svdconv/SVDModel/src/SvdCluster.cpp
+index 19d5f774..372958cb 100644
+--- a/tools/svdconv/SVDModel/src/SvdCluster.cpp
++++ b/tools/svdconv/SVDModel/src/SvdCluster.cpp
+@@ -21,8 +21,8 @@ SvdCluster::SvdCluster(SvdItem* parent):
+   m_enumContainer(0),
+   m_calcSize(0),
+   m_offset(0),
+-  m_resetValue(0),
+-  m_resetMask(0),
++  m_resetValue(std::nullopt),
++  m_resetMask(std::nullopt),
+   m_access(SvdTypes::Access::UNDEF),
+   m_modifiedWriteValues(SvdTypes::ModifiedWriteValue::UNDEF),
+   m_readAction(SvdTypes::ReadAction::UNDEF)
+@@ -66,15 +66,23 @@ bool SvdCluster::ProcessXmlElement(XMLTreeElement* xmlElement)
+     return true;
+   }
+   else if(tag == "resetValue") {
+-    if(!SvdUtils::ConvertNumber(value, m_resetValue)) {
++    uint64_t tmp;
++
++    if(!SvdUtils::ConvertNumber(value, tmp)) {
+       SvdUtils::CheckParseError(tag, value, xmlElement->GetLineNumber());
+     }
++
++    m_resetValue = tmp;
+     return true;
+   }
+   else if(tag == "resetMask") {
+-    if(!SvdUtils::ConvertNumber(value, m_resetMask)) {
++    uint64_t tmp;
++
++    if(!SvdUtils::ConvertNumber(value, tmp)) {
+       SvdUtils::CheckParseError(tag, value, xmlElement->GetLineNumber());
+     }
++
++    m_resetMask = tmp;
+     return true;
+   }
+   else if(tag == "alternateCluster") {
+diff --git a/tools/svdconv/SVDModel/src/SvdDevice.cpp b/tools/svdconv/SVDModel/src/SvdDevice.cpp
+index 6387ab26..27328a9d 100644
+--- a/tools/svdconv/SVDModel/src/SvdDevice.cpp
++++ b/tools/svdconv/SVDModel/src/SvdDevice.cpp
+@@ -28,8 +28,8 @@ SvdDevice::SvdDevice(SvdItem* parent):
+   m_hasAnnonUnions(false),
+   m_addressUnitBits(0),
+   m_width(0),
+-  m_resetValue(0),
+-  m_resetMask(0),
++  m_resetValue(std::nullopt),
++  m_resetMask(std::nullopt),
+   m_access(SvdTypes::Access::UNDEF)
+ {
+   SetSvdLevel(L_Device);
+@@ -112,15 +112,23 @@ bool SvdDevice::ProcessXmlElement(XMLTreeElement* xmlElement)
+     return true;
+   }
+   else if(tag == "resetValue") {
+-    if(!SvdUtils::ConvertNumber(value, m_resetValue)) {
++    uint64_t tmp;
++
++    if(!SvdUtils::ConvertNumber(value, tmp)) {
+       SvdUtils::CheckParseError(tag, value, xmlElement->GetLineNumber());
+     }
++
++    m_resetValue = tmp;
+     return true;
+   }
+   else if(tag == "resetMask") {
+-    if(!SvdUtils::ConvertNumber(value, m_resetMask)) {
++    uint64_t tmp;
++
++    if(!SvdUtils::ConvertNumber(value, tmp)) {
+       SvdUtils::CheckParseError(tag, value, xmlElement->GetLineNumber());
+     }
++
++    m_resetMask = tmp;
+     return true;
+   }
+   else if(tag == "peripherals") {
+diff --git a/tools/svdconv/SVDModel/src/SvdItem.cpp b/tools/svdconv/SVDModel/src/SvdItem.cpp
+index e45a04dc..4711b2f0 100644
+--- a/tools/svdconv/SVDModel/src/SvdItem.cpp
++++ b/tools/svdconv/SVDModel/src/SvdItem.cpp
+@@ -1084,8 +1084,8 @@ uint64_t SvdItem::GetEffectiveResetValue()
+ {
+   for(auto parent=this; parent; parent=parent->GetParent()) {
+     const auto val = parent->GetResetValue();
+-    if(val != 0) {
+-      return val;
++    if (val.has_value()) {
++      return val.value();
+     }
+   }
+ 
+@@ -1096,8 +1096,8 @@ uint64_t SvdItem::GetEffectiveResetMask()
+ {
+   for(auto parent=this; parent; parent=parent->GetParent()) {
+     const auto val = parent->GetResetMask();
+-    if(val != 0) {
+-      return val;
++    if (val.has_value()) {
++      return val.value();
+     }
+   }
+ 
+diff --git a/tools/svdconv/SVDModel/src/SvdPeripheral.cpp b/tools/svdconv/SVDModel/src/SvdPeripheral.cpp
+index 902ac3fd..4e8a206a 100644
+--- a/tools/svdconv/SVDModel/src/SvdPeripheral.cpp
++++ b/tools/svdconv/SVDModel/src/SvdPeripheral.cpp
+@@ -85,8 +85,8 @@ SvdPeripheral::SvdPeripheral(SvdItem* parent):
+   m_disableCondition(nullptr),
+   m_hasAnnonUnions(false),
+   m_calcSize(0),
+-  m_resetValue(0),
+-  m_resetMask(0),
++  m_resetValue(std::nullopt),
++  m_resetMask(std::nullopt),
+   m_access(SvdTypes::Access::UNDEF)
+ {
+   SetSvdLevel(L_Peripheral);
+@@ -190,15 +190,23 @@ bool SvdPeripheral::ProcessXmlElement(XMLTreeElement* xmlElement)
+     return true;
+   }
+   else if(tag == "resetValue") {
+-    if(!SvdUtils::ConvertNumber(value, m_resetValue)) {
++    uint64_t tmp;
++
++    if(!SvdUtils::ConvertNumber(value, tmp)) {
+       SvdUtils::CheckParseError(tag, value, xmlElement->GetLineNumber());
+     }
++    
++    m_resetValue = tmp;
+     return true;
+   }
+   else if(tag == "resetMask") {
+-    if(!SvdUtils::ConvertNumber(value, m_resetMask)) {
++    uint64_t tmp;
++
++    if(!SvdUtils::ConvertNumber(value, tmp)) {
+       SvdUtils::CheckParseError(tag, value, xmlElement->GetLineNumber());
+     }
++
++    m_resetMask = tmp;
+     return true;
+   }
+   else if(tag == "addressBlock") {
+@@ -371,8 +379,8 @@ bool SvdPeripheral::CopyItem(SvdItem *from)
+   if(appendToName     == "")                      { SetAppendToName        (pFrom->GetAppendToName        ()); }
+   if(disableCondition == nullptr)                 { CopyDisableCondition    (pFrom->GetDisableCondition    ()); }  // TODO: Add a copy mechanism?
+   if(address          == 0 )                      { SetAddress             (pFrom->GetAddress             ()); }
+-  if(resetValue       == 0 )                      { SetResetValue          (pFrom->GetResetValue          ()); }
+-  if(resetMask        == 0 )                      { SetResetMask           (pFrom->GetResetMask           ()); }
++  if(!resetValue.has_value())                     { SetResetValue          (pFrom->GetResetValue          ()); }
++  if(!resetMask.has_value())                      { SetResetMask           (pFrom->GetResetMask           ()); }
+   if(access           == SvdTypes::Access::UNDEF) { SetAccess              (pFrom->GetAccess              ()); }
+ 
+   CopyAddressBlocks(pFrom);
+@@ -1380,7 +1388,7 @@ bool SvdPeripheral::CheckAddressBlocks()
+     CheckAddressBlockAddrSpace(addrBlock);
+   }
+ 
+-  MergeAddressBlocks();
++  // MergeAddressBlocks();
+ 
+   return true;
+ }
+diff --git a/tools/svdconv/SVDModel/src/SvdRegister.cpp b/tools/svdconv/SVDModel/src/SvdRegister.cpp
+index 0e5d1509..e27461d5 100644
+--- a/tools/svdconv/SVDModel/src/SvdRegister.cpp
++++ b/tools/svdconv/SVDModel/src/SvdRegister.cpp
+@@ -66,8 +66,8 @@ SvdRegister::SvdRegister(SvdItem* parent):
+   m_hasValidFields(true),
+   m_accessMaskValid(false),
+   m_offset(SvdItem::VALUE64_NOT_INIT),
+-  m_resetValue(0),
+-  m_resetMask(0),
++  m_resetValue(std::nullopt),
++  m_resetMask(std::nullopt),
+   m_accessMaskRead(0xffffffff),
+   m_accessMaskWrite(0xffffffff),
+   m_access(SvdTypes::Access::UNDEF),
+@@ -126,15 +126,23 @@ bool SvdRegister::ProcessXmlElement(XMLTreeElement* xmlElement)
+     return true;
+   }
+   else if(tag == "resetValue") {
+-    if(!SvdUtils::ConvertNumber(value, m_resetValue)) {
++    uint64_t tmp;
++
++    if(!SvdUtils::ConvertNumber(value, tmp)) {
+       SvdUtils::CheckParseError(tag, value, xmlElement->GetLineNumber());
+     }
++
++    m_resetValue = tmp;
+     return true;
+   }
+   else if(tag == "resetMask") {
+-    if(!SvdUtils::ConvertNumber(value, m_resetMask)) {
++    uint64_t tmp;
++
++    if(!SvdUtils::ConvertNumber(value, tmp)) {
+       SvdUtils::CheckParseError(tag, value, xmlElement->GetLineNumber());
+     }
++    
++    m_resetMask = tmp;
+     return true;
+   }
+   else if(tag == "modifiedWriteValues") {
+@@ -320,8 +328,8 @@ bool SvdRegister::CopyItem(SvdItem *from)
+   if(dataType            == "")                                   { SetDataType            (pFrom->GetDataType           ()); }
+   if(offset              == SvdItem::VALUE64_NOT_INIT)            { SetOffset              (pFrom->GetOffset             ()); }
+   if(width               == 0 )                                   { SetBitWidth            (pFrom->GetBitWidth           ()); }
+-  if(resetValue          == 0 )                                   { SetResetValue          (pFrom->GetResetValue         ()); }
+-  if(resetMask           == 0 )                                   { SetResetMask           (pFrom->GetResetMask          ()); }
++  if(!resetValue.has_value()  )                                   { SetResetValue          (pFrom->GetResetValue         ()); }
++  if(!resetMask.has_value()   )                                   { SetResetMask           (pFrom->GetResetMask          ()); }
+   if(access              == SvdTypes::Access::UNDEF)              { SetAccess              (pFrom->GetAccess             ()); }
+   if(modifiedWriteValues == SvdTypes::ModifiedWriteValue::UNDEF)  { SetModifiedWriteValues (pFrom->GetModifiedWriteValue ()); }
+   if(readAction          == SvdTypes::ReadAction::UNDEF)          { SetReadAction          (pFrom->GetReadAction         ()); }
+@@ -702,12 +710,12 @@ bool SvdRegister::CheckItem()
+   }
+   maxRegValue -= 1;
+ 
+-  if(resetValue > maxRegValue) {
+-    LogMsg("M382", LEVEL("Register"), NAME(name), NAME2("Reset Value"), HEXNUM(resetValue), NUM(regWidth), lineNo);
++  if (resetValue.has_value() && resetValue.value() > maxRegValue) {
++    LogMsg("M382", LEVEL("Register"), NAME(name), NAME2("Reset Value"), HEXNUM(resetValue.value()), NUM(regWidth), lineNo);
+     SetResetValue(0);
+   }
+-  if(resetMask > maxRegValue) {
+-    LogMsg("M382", LEVEL("Register"), NAME(name), NAME2("Reset Mask"), HEXNUM(resetMask), NUM(regWidth), lineNo);
++  if (resetMask.has_value() && resetMask.value() > maxRegValue) {
++    LogMsg("M382", LEVEL("Register"), NAME(name), NAME2("Reset Mask"), HEXNUM(resetMask.value()), NUM(regWidth), lineNo);
+     SetResetMask(0);
+   }
+ 
+diff --git a/tools/svdconv/SVDModel/src/SvdUtils.cpp b/tools/svdconv/SVDModel/src/SvdUtils.cpp
+index db275db3..c0a3eb5c 100644
+--- a/tools/svdconv/SVDModel/src/SvdUtils.cpp
++++ b/tools/svdconv/SVDModel/src/SvdUtils.cpp
+@@ -671,6 +671,12 @@ bool SvdUtils::ConvertBitRange(const string &text, uint32_t &msb, uint32_t &lsb)
+     return false;
+   }
+ 
++  if(msb < lsb) {
++    uint32_t tmp = msb;
++    msb = lsb;
++    lsb = tmp;
++  }
++
+   return true;
+ }
+ 
